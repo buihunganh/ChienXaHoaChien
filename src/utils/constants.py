@@ -1,0 +1,59 @@
+"""Global constants for rendering, physics, and UI tuning."""
+
+from pathlib import Path
+
+WIDTH = 1280
+HEIGHT = 720
+FPS = 60
+SCREEN_TITLE = "Chien Xa Hoa Chien"
+
+# Assets
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ASSETS_DIR = PROJECT_ROOT / "assets"
+IMAGES_DIR = ASSETS_DIR / "images"
+SOUNDS_DIR = ASSETS_DIR / "sounds"
+FONTS_DIR = ASSETS_DIR / "fonts"
+TERRAIN_IMAGE_PATH = IMAGES_DIR / "terrain.png"
+
+# World physics
+GRAVITY = 760.0
+WIND_MIN = -85.0
+WIND_MAX = 85.0
+
+# Tank movement and combat
+TANK_MOVE_SPEED = 150.0
+TANK_STEP_UP = 16
+TANK_MAX_DROP = 24
+TANK_MAX_HP = 100
+MAX_FUEL = 100.0
+FUEL_COST_PER_PIXEL = 0.055
+
+# Tank dimensions (used for sprite and terrain fitting)
+TANK_BODY_WIDTH = 64
+TANK_BODY_HEIGHT = 24
+TANK_TRACK_WIDTH = 70
+TANK_TRACK_HEIGHT = 10
+TANK_TURRET_RADIUS = 11
+TANK_BARREL_LENGTH = 38
+
+# Bullet, explosion, and aiming
+BULLET_RADIUS = 4
+BULLET_DAMAGE = 35
+EXPLOSION_RADIUS = 44
+EXPLOSION_DAMAGE_RADIUS = 72
+DRAG_MIN_LENGTH = 16.0
+DRAG_POWER_SCALE = 3.1
+SHOT_POWER_MAX = 700.0
+SHOT_POWER_MIN = 220.0
+SHOT_CHARGE_RATE = 520.0
+
+# Colors
+WHITE = (245, 245, 245)
+BLACK = (20, 20, 20)
+SKY_BLUE = (120, 180, 235)
+GROUND_BROWN = (104, 81, 56)
+GROUND_DARK = (83, 65, 44)
+RED = (210, 60, 60)
+GREEN = (80, 180, 90)
+YELLOW = (230, 205, 80)
+CYAN = (70, 190, 220)
