@@ -12,6 +12,7 @@ from src.ui.hud import HUD
 from src.ui.main_menu import MainMenu
 from src.utils.constants import (
     EXPLOSION_DAMAGE_RADIUS,
+    GRAVITY,
     GREEN,
     HEIGHT,
     RED,
@@ -34,6 +35,9 @@ class GameManager:
         self.menu = MainMenu()
         self.hud = HUD()
         self.terrain = Terrain()
+
+        self.game_mode = "PVP"
+        self.difficulty = "Trung binh"
 
         self.wind = random.uniform(WIND_MIN, WIND_MAX)
         self.turn_index = 0
@@ -63,6 +67,11 @@ class GameManager:
         self.charge_power = SHOT_POWER_MIN
         self.charge_direction = 1.0
 
+        self.bot_pending_shot = False
+        self.bot_shot_delay = 0.0
+        self.tank_prev_x = [tank.x for tank in self.tanks]
+        self.tank_est_vel_x = [0.0 for _ in self.tanks]
+
     def _reset_turn_inputs(self) -> None:
         self.is_dragging = False
         self.drag_start = None
@@ -77,11 +86,15 @@ class GameManager:
         self.wind = random.uniform(WIND_MIN, WIND_MAX)
         self.current_bullet_type = random.choice(BULLET_TYPES)
         self._reset_turn_inputs()
+        self.bot_pending_shot = False
+        self.bot_shot_delay = 0.0
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if self.state == "menu":
             action = self.menu.handle_event(event)
             if action == "start":
+                self.game_mode = self.menu.selected_mode
+                self.difficulty = self.menu.selected_difficulty
                 self.state = "playing"
             return
 
@@ -99,6 +112,9 @@ class GameManager:
             return
 
         if self.active_bullet is not None:
+            return
+
+        if self._is_bot_turn():
             return
 
         if event.type == pygame.MOUSEMOTION:
@@ -179,6 +195,225 @@ class GameManager:
         )
         self.aim_ready = False
 
+    def _is_bot_turn(self) -> bool:
+        return self.game_mode == "PVE" and self.turn_index == 1
+
+    def _update_tank_motion_estimates(self, dt: float) -> None:
+        """Track smoothed horizontal velocity for simple target-leading behavior."""
+        if dt <= 1e-5:
+            return
+
+        alpha = 0.22
+        for idx, tank in enumerate(self.tanks):
+            raw_vx = (tank.x - self.tank_prev_x[idx]) / dt
+            self.tank_est_vel_x[idx] = (1.0 - alpha) * self.tank_est_vel_x[idx] + alpha * raw_vx
+            self.tank_prev_x[idx] = tank.x
+
+    def _predict_target_x(self, shooter: Tank, target: Tank, target_idx: int, power: float) -> float:
+        """Predict future target x using estimated velocity and approximate flight time."""
+        distance = abs(target.x - shooter.x)
+        lead_time = max(0.30, min(1.50, distance / max(120.0, power * 0.88)))
+        predicted_x = target.x + self.tank_est_vel_x[target_idx] * lead_time
+        return max(10.0, min(WIDTH - 10.0, predicted_x))
+
+    def _orient_angle_toward(self, angle_left: float, shooter_x: float, target_x: float) -> float:
+        """Convert a left-facing angle template to either side based on relative target position."""
+        if shooter_x <= target_x:
+            return 180.0 - angle_left
+        return angle_left
+
+    def _simulate_impact_point(self, shooter: Tank, angle_deg: float, power: float) -> tuple[float, float]:
+        """Run a lightweight internal trajectory simulation to estimate impact location."""
+        muzzle_x, muzzle_y = shooter.get_barrel_tip()
+        rad = math.radians(angle_deg)
+        x = muzzle_x
+        y = muzzle_y
+        vx = math.cos(rad) * power
+        vy = -math.sin(rad) * power
+
+        dt = 1.0 / 60.0
+        for _ in range(360):
+            vx += self.wind * dt
+            vy += GRAVITY * dt
+            x += vx * dt
+            y += vy * dt
+
+            if x < 0 or x > WIDTH or y > HEIGHT:
+                break
+            if self.terrain.is_solid_at(x, y):
+                break
+
+        return x, y
+
+    def _eval_shot_error(
+        self,
+        shooter: Tank,
+        target_x: float,
+        target_y: float,
+        angle_deg: float,
+        power: float,
+    ) -> tuple[float, float, float]:
+        impact_x, impact_y = self._simulate_impact_point(shooter, angle_deg, power)
+        error = abs(impact_x - target_x) + 0.35 * abs(impact_y - target_y)
+        return error, impact_x, impact_y
+
+    def _plan_easy_lookup_shot(self, shooter: Tank, target: Tank) -> tuple[float, float, float, float]:
+        """Easy bot: distance lookup table + strong random noise."""
+        distance = abs(target.x - shooter.x)
+        ratio = max(0.0, min(1.0, distance / (WIDTH * 0.72)))
+
+        table: tuple[tuple[float, float, float], ...] = (
+            (0.16, 146.0, 270.0),
+            (0.30, 139.0, 330.0),
+            (0.44, 132.0, 400.0),
+            (0.58, 126.0, 480.0),
+            (0.74, 119.0, 565.0),
+            (1.00, 112.0, 650.0),
+        )
+
+        base_angle_left = table[-1][1]
+        base_power = table[-1][2]
+        for threshold, angle_left, power in table:
+            if ratio <= threshold:
+                base_angle_left = angle_left
+                base_power = power
+                break
+
+        angle = self._orient_angle_toward(base_angle_left, shooter.x, target.x)
+        angle += random.uniform(-22.0, 22.0)
+        power = base_power + random.uniform(-170.0, 170.0)
+
+        if random.random() < 0.28:
+            angle += random.uniform(-24.0, 24.0)
+            power += random.uniform(-150.0, 150.0)
+
+        angle = max(10.0, min(170.0, angle))
+        power = max(SHOT_POWER_MIN, min(SHOT_POWER_MAX, power))
+        return angle, power, 0.50, 1.05
+
+    def _plan_medium_heuristic_shot(
+        self,
+        shooter: Tank,
+        target: Tank,
+        target_idx: int,
+    ) -> tuple[float, float, float, float]:
+        """Medium bot: weighted heuristic with predicted target lead and controlled noise."""
+        predicted_target_x = self._predict_target_x(shooter, target, target_idx, SHOT_POWER_MAX)
+        distance = abs(predicted_target_x - shooter.x)
+        dist_ratio = max(0.0, min(1.0, distance / (WIDTH * 0.72)))
+
+        power_span = SHOT_POWER_MAX - SHOT_POWER_MIN
+        base_power = SHOT_POWER_MIN + power_span * (0.25 + 0.65 * dist_ratio)
+        base_angle_left = 152.0 - 40.0 * dist_ratio
+        base_angle = self._orient_angle_toward(base_angle_left, shooter.x, predicted_target_x)
+
+        angle = base_angle + random.uniform(-15.0, 15.0)
+        power = base_power + random.uniform(-120.0, 120.0)
+
+        if random.random() < 0.12:
+            angle += random.uniform(-18.0, 18.0)
+            power += random.uniform(-130.0, 130.0)
+
+        angle = max(10.0, min(170.0, angle))
+        power = max(SHOT_POWER_MIN, min(SHOT_POWER_MAX, power))
+        return angle, power, 0.40, 0.90
+
+    def _plan_hard_refined_shot(
+        self,
+        shooter: Tank,
+        target: Tank,
+        target_idx: int,
+    ) -> tuple[float, float, float, float]:
+        """Hard bot: iterative refinement over simulated trajectory error."""
+        target_x = self._predict_target_x(shooter, target, target_idx, 0.64 * SHOT_POWER_MAX)
+        target_y = target.y - 18.0
+
+        # Start from medium-quality guess, then optimize.
+        best_angle, best_power, _, _ = self._plan_medium_heuristic_shot(shooter, target, target_idx)
+        best_error, impact_x, _ = self._eval_shot_error(shooter, target_x, target_y, best_angle, best_power)
+
+        angle_step = 13.0
+        power_step = 95.0
+        for _ in range(8):
+            candidates = (
+                (best_angle, best_power),
+                (best_angle + angle_step, best_power),
+                (best_angle - angle_step, best_power),
+                (best_angle, best_power + power_step),
+                (best_angle, best_power - power_step),
+                (best_angle + angle_step, best_power + power_step),
+                (best_angle - angle_step, best_power + power_step),
+                (best_angle + angle_step, best_power - power_step),
+                (best_angle - angle_step, best_power - power_step),
+            )
+
+            improved = False
+            for cand_angle, cand_power in candidates:
+                cand_angle = max(10.0, min(170.0, cand_angle))
+                cand_power = max(SHOT_POWER_MIN, min(SHOT_POWER_MAX, cand_power))
+                cand_error, cand_impact_x, _ = self._eval_shot_error(
+                    shooter,
+                    target_x,
+                    target_y,
+                    cand_angle,
+                    cand_power,
+                )
+                if cand_error < best_error:
+                    best_error = cand_error
+                    best_angle = cand_angle
+                    best_power = cand_power
+                    impact_x = cand_impact_x
+                    improved = True
+
+            # Nudge power with a binary-search-like correction for horizontal overshoot.
+            if not improved:
+                if shooter.x <= target_x:
+                    horizontal_error = impact_x - target_x
+                else:
+                    horizontal_error = target_x - impact_x
+                best_power -= max(-60.0, min(60.0, horizontal_error * 0.18))
+                best_power = max(SHOT_POWER_MIN, min(SHOT_POWER_MAX, best_power))
+
+            angle_step *= 0.58
+            power_step *= 0.62
+
+        best_angle += random.uniform(-4.0, 4.0)
+        best_power += random.uniform(-34.0, 34.0)
+        best_angle = max(10.0, min(170.0, best_angle))
+        best_power = max(SHOT_POWER_MIN, min(SHOT_POWER_MAX, best_power))
+        return best_angle, best_power, 0.28, 0.62
+
+    def _plan_bot_shot(self, shooter: Tank, target: Tank, target_idx: int) -> None:
+        if self.difficulty == "De":
+            angle, power, delay_min, delay_max = self._plan_easy_lookup_shot(shooter, target)
+        elif self.difficulty == "Kho":
+            angle, power, delay_min, delay_max = self._plan_hard_refined_shot(shooter, target, target_idx)
+        else:
+            angle, power, delay_min, delay_max = self._plan_medium_heuristic_shot(shooter, target, target_idx)
+
+        shooter.aim_angle_deg = angle
+        self.charge_power = power
+        self.bot_pending_shot = True
+        self.bot_shot_delay = random.uniform(delay_min, delay_max)
+
+    def _update_bot_turn(self, dt: float, shooter: Tank) -> None:
+        if not shooter.is_alive or self.active_bullet is not None:
+            return
+
+        target_idx = (self.turn_index + 1) % len(self.tanks)
+        target = self.tanks[target_idx]
+        if not target.is_alive:
+            return
+
+        if not self.bot_pending_shot:
+            self._plan_bot_shot(shooter, target, target_idx)
+
+        self.bot_shot_delay -= dt
+        if self.bot_shot_delay <= 0.0:
+            self._fire_charged_shot(shooter)
+            self.bot_pending_shot = False
+            self.bot_shot_delay = 0.0
+
     def update(self, dt: float) -> None:
         if self.state != "playing":
             return
@@ -188,7 +423,12 @@ class GameManager:
         for tank in self.tanks:
             tank.apply_gravity(dt, self.terrain)
 
-        if self.active_bullet is None and current.is_alive and not self.is_charging:
+        self._update_tank_motion_estimates(dt)
+
+        if self.active_bullet is None and current.is_alive and self._is_bot_turn():
+            self._update_bot_turn(dt, current)
+
+        if self.active_bullet is None and current.is_alive and not self.is_charging and not self._is_bot_turn():
             keys = pygame.key.get_pressed()
             if keys[pygame.K_a] or keys[pygame.K_LEFT]:
                 current.move_horizontal(-1.0, dt, self.terrain)
@@ -238,7 +478,7 @@ class GameManager:
         target_idx = (self.turn_index + 1) % len(self.tanks)
         target = self.tanks[target_idx]
         if target.is_alive and self._bullet_hits_tank(self.active_bullet, target):
-            self._explode(self.active_bullet)
+            self._explode(self.active_bullet, direct_hit_tank=target)
             return
 
     def _bullet_hits_tank(self, bullet: Bullet, tank: Tank) -> bool:
@@ -251,23 +491,33 @@ class GameManager:
 
         return bool(mask.get_at((local_x, local_y)))
 
-    def _explode(self, bullet: Bullet) -> None:
+    def _explode(self, bullet: Bullet, direct_hit_tank: Tank | None = None) -> None:
         self.terrain.carve_crater(bullet.x, bullet.y, bullet.explosion_radius)
-        self._apply_explosion_damage(bullet.x, bullet.y, bullet)
+        self._apply_explosion_damage(bullet.x, bullet.y, bullet, direct_hit_tank)
         self.active_bullet = None
         self._next_turn()
         self._check_game_over()
 
-    def _apply_explosion_damage(self, x: float, y: float, bullet: Bullet) -> None:
+    def _apply_explosion_damage(
+        self,
+        x: float,
+        y: float,
+        bullet: Bullet,
+        direct_hit_tank: Tank | None = None,
+    ) -> None:
         for tank in self.tanks:
             if not tank.is_alive:
+                continue
+
+            if direct_hit_tank is tank:
+                tank.take_damage(bullet.damage)
                 continue
 
             blast_radius = max(EXPLOSION_DAMAGE_RADIUS, bullet.explosion_radius * 1.6)
             distance = math.dist((x, y), (tank.x, tank.y))
             if distance <= blast_radius:
                 ratio = 1.0 - (distance / blast_radius)
-                damage = int(max(1, bullet.damage * (0.35 + 0.65 * ratio)))
+                damage = int(max(1, bullet.damage * (0.45 + 0.55 * ratio)))
                 tank.take_damage(damage)
 
     def _check_game_over(self) -> None:

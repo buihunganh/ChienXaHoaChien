@@ -19,9 +19,9 @@ class BulletType:
 
 
 BULLET_TYPES: tuple[BulletType, ...] = (
-    BulletType("Normal", damage=32, radius=4, explosion_radius=42, color=(30, 30, 30)),
-    BulletType("High-Explosive", damage=24, radius=5, explosion_radius=58, color=(55, 45, 30)),
-    BulletType("Armor-Pierce", damage=52, radius=3, explosion_radius=34, color=(25, 25, 25)),
+    BulletType("Normal", damage=40, radius=4, explosion_radius=42, color=(30, 30, 30)),
+    BulletType("High-Explosive", damage=32, radius=5, explosion_radius=58, color=(55, 45, 30)),
+    BulletType("Armor-Pierce", damage=58, radius=3, explosion_radius=34, color=(25, 25, 25)),
 )
 
 
