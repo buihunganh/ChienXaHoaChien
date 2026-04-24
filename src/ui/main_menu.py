@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 import pygame
 
-from src.utils.constants import HEIGHT, WIDTH
+from src.utils.asset_manager import assets
+from src.utils.audio_manager import audio
+from src.utils.constants import FONT_SIZE_NORMAL, FONT_SIZE_SMALL, FONT_SIZE_TITLE, HEIGHT, WIDTH
+from src.utils.strings import t
 
 
 @dataclass
@@ -25,11 +28,11 @@ class MainMenu:
 
     def __init__(self) -> None:
         self.state = "home"
-        self.title_font = pygame.font.Font(None, 98)
-        self.big_font = pygame.font.Font(None, 78)
-        self.btn_font = pygame.font.Font(None, 64)
-        self.text_font = pygame.font.Font(None, 34)
-        self.small_font = pygame.font.Font(None, 28)
+        self.title_font = assets.get_font(FONT_SIZE_TITLE)
+        self.big_font   = assets.get_font(FONT_SIZE_TITLE)
+        self.btn_font   = assets.get_font(FONT_SIZE_TITLE)
+        self.text_font  = assets.get_font(FONT_SIZE_NORMAL)
+        self.small_font = assets.get_font(FONT_SIZE_SMALL)
 
         self.selected_mode = "PVP"
         self.selected_difficulty = "Trung binh"
@@ -39,8 +42,12 @@ class MainMenu:
         self._difficulty_buttons = self._build_difficulty_buttons()
         self._level_buttons = self._build_level_buttons()
 
+        # Lazy-import to avoid circular deps at module level
+        from src.ui.settings_screen import SettingsScreen
+        self._settings_screen = SettingsScreen()
+
         self.back_button = MenuButton(
-            label="< Back",
+            label=t("back"),
             rect=pygame.Rect(26, 24, 160, 56),
             fill_top=(248, 248, 244),
             fill_bottom=(224, 224, 217),
@@ -175,7 +182,16 @@ class MainMenu:
         return cards
 
     def _draw_background(self, screen: pygame.Surface) -> None:
-        """Paint soft sky/grass gradients for a friendly cartoon look."""
+        """Blit main menu background image; fallback to procedural gradient."""
+        bg = assets.get_image("bg/main_menu")
+        if bg is not None:
+            # Scale to screen if needed
+            if bg.get_size() != (WIDTH, HEIGHT):
+                bg = pygame.transform.scale(bg, (WIDTH, HEIGHT))
+            screen.blit(bg, (0, 0))
+            return
+
+        # --- Fallback: original procedural gradient ---
         for y in range(HEIGHT):
             t = y / max(1, HEIGHT - 1)
             if t < 0.62:
@@ -194,7 +210,6 @@ class MainMenu:
                 )
             pygame.draw.line(screen, color, (0, y), (WIDTH, y))
 
-        # Decorative soft hills and circles to mimic the sample scene depth.
         pygame.draw.ellipse(screen, (163, 226, 121), (-80, 505, 600, 270))
         pygame.draw.ellipse(screen, (142, 214, 100), (350, 500, 700, 270))
         pygame.draw.ellipse(screen, (126, 201, 88), (870, 515, 520, 250))
@@ -280,6 +295,14 @@ class MainMenu:
         return None
 
     def handle_event(self, event: pygame.event.Event) -> str | None:
+        # Settings screen consumes events while active
+        if self.state == "settings":
+            result = self._settings_screen.handle_event(event)
+            if result == "close":
+                self.state = "home"
+                audio.play_sfx("click")
+            return None
+
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_RETURN and self.state == "home":
                 self.state = "mode"
@@ -333,6 +356,11 @@ class MainMenu:
 
     def draw(self, screen: pygame.Surface) -> None:
         self._draw_background(screen)
+
+        # Settings screen overlays on top of background
+        if self.state == "settings":
+            self._settings_screen.draw(screen)
+            return
 
         if self.state == "home":
             for btn in self._home_buttons:

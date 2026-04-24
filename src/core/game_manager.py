@@ -8,10 +8,15 @@ import pygame
 from src.core.terrain import Terrain
 from src.entities.bullet import BULLET_TYPES, Bullet, BulletType
 from src.entities.tank import Tank
+from src.ui.game_over_overlay import GameOverOverlay
 from src.ui.hud import HUD
 from src.ui.main_menu import MainMenu
+from src.ui.pause_menu import PauseMenu
+from src.utils.asset_manager import assets
+from src.utils.audio_manager import audio
 from src.utils.constants import (
     EXPLOSION_DAMAGE_RADIUS,
+    FONT_SIZE_TITLE,
     GRAVITY,
     GREEN,
     HEIGHT,
@@ -35,6 +40,10 @@ class GameManager:
         self.menu = MainMenu()
         self.hud = HUD()
         self.terrain = Terrain()
+        self.pause_menu = PauseMenu()
+        self.paused = False
+        self._game_over_overlay: GameOverOverlay | None = None
+        audio.play_music("menu")  # start BGM immediately on launch / restart
 
         self.game_mode = "PVP"
         self.difficulty = "Trung binh"
@@ -88,6 +97,7 @@ class GameManager:
         self._reset_turn_inputs()
         self.bot_pending_shot = False
         self.bot_shot_delay = 0.0
+        audio.stop_movement()  # ensure movement loop stops on turn change
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if self.state == "menu":
@@ -96,14 +106,43 @@ class GameManager:
                 self.game_mode = self.menu.selected_mode
                 self.difficulty = self.menu.selected_difficulty
                 self.state = "playing"
+                audio.play_music("battle")
+            elif action is None and event.type == pygame.MOUSEBUTTONDOWN:
+                # Button was clicked in menu (any click while in menu)
+                audio.play_sfx("click")
+            return
+
+        # --- Pause overlay intercepts all events while paused ---
+        if self.paused:
+            result = self.pause_menu.handle_event(event)
+            if result == "resume":
+                self.paused = False
             return
 
         if self.state == "game_over" and event.type == pygame.KEYDOWN and event.key == pygame.K_r:
+            # Preserve the mode/difficulty the player chose — __init__ resets them to defaults
+            saved_mode       = self.game_mode
+            saved_difficulty = self.difficulty
             self.__init__(self.screen)
+            self.game_mode   = saved_mode
+            self.difficulty  = saved_difficulty
             self.state = "playing"
+            audio.play_music("battle")
             return
 
         if self.state != "playing":
+            return
+
+        # ☰ button click → pause
+        if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                and self.hud.menu_btn_rect.collidepoint(event.pos)):
+            self.paused = True
+            audio.play_sfx("click")
+            return
+
+        # Escape during play → pause
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE and self.state == "playing":
+            self.paused = True
             return
 
         current = self.tanks[self.turn_index]
@@ -194,6 +233,7 @@ class GameManager:
             color=self.current_bullet_type.color,
         )
         self.aim_ready = False
+        audio.play_sfx("shoot")  # fire SFX tied to bullet creation, not key press
 
     def _is_bot_turn(self) -> bool:
         return self.game_mode == "PVE" and self.turn_index == 1
@@ -415,7 +455,11 @@ class GameManager:
             self.bot_shot_delay = 0.0
 
     def update(self, dt: float) -> None:
-        if self.state != "playing":
+        # Always tick the game-over overlay even when gameplay is frozen
+        if self.state == "game_over" and self._game_over_overlay is not None:
+            self._game_over_overlay.update(dt)
+
+        if self.state != "playing" or self.paused:
             return
 
         current = self.tanks[self.turn_index]
@@ -428,21 +472,30 @@ class GameManager:
         if self.active_bullet is None and current.is_alive and self._is_bot_turn():
             self._update_bot_turn(dt, current)
 
+        # Determine whether the human player is actually moving this frame.
+        # Must be checked unconditionally every frame so the sound stops
+        # when bullets are in flight, charging, or it's the bot's turn.
+        _player_moving = False
+
         if self.active_bullet is None and current.is_alive and not self.is_charging and not self._is_bot_turn():
             keys = pygame.key.get_pressed()
             if keys[pygame.K_a] or keys[pygame.K_LEFT]:
                 current.move_horizontal(-1.0, dt, self.terrain)
+                _player_moving = True
             if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
                 current.move_horizontal(1.0, dt, self.terrain)
+                _player_moving = True
 
             # Gunny-like cannon control: Up/Down (or W/S) changes barrel angle.
             aim_speed = 95.0
+            aiming = False
             if keys[pygame.K_UP] or keys[pygame.K_w]:
                 delta = aim_speed * dt
                 if self.turn_index == 0:
                     current.aim_angle_deg = min(170.0, current.aim_angle_deg + delta)
                 else:
                     current.aim_angle_deg = max(10.0, current.aim_angle_deg - delta)
+                aiming = True
 
             if keys[pygame.K_DOWN] or keys[pygame.K_s]:
                 delta = aim_speed * dt
@@ -450,6 +503,20 @@ class GameManager:
                     current.aim_angle_deg = max(10.0, current.aim_angle_deg - delta)
                 else:
                     current.aim_angle_deg = min(170.0, current.aim_angle_deg + delta)
+                aiming = True
+
+            # Angle-change SFX: throttle to once per ~200 ms to avoid spam
+            if aiming:
+                self._angle_sfx_timer = getattr(self, "_angle_sfx_timer", 0.0) - dt
+                if self._angle_sfx_timer <= 0.0:
+                    audio.play_sfx("angle")
+                    self._angle_sfx_timer = 0.20
+            else:
+                self._angle_sfx_timer = 0.0
+
+        # Always update movement sound — False stops the loop when not moving
+        audio.update_movement(_player_moving)
+
 
         if self.is_charging:
             self.charge_power += self.charge_direction * SHOT_CHARGE_RATE * dt
@@ -494,6 +561,11 @@ class GameManager:
     def _explode(self, bullet: Bullet, direct_hit_tank: Tank | None = None) -> None:
         self.terrain.carve_crater(bullet.x, bullet.y, bullet.explosion_radius)
         self._apply_explosion_damage(bullet.x, bullet.y, bullet, direct_hit_tank)
+        # Play the correct explosion sound based on what was hit
+        if direct_hit_tank is not None:
+            audio.play_sfx("hit_tank")
+        else:
+            audio.play_sfx("hit_ground")
         self.active_bullet = None
         self._next_turn()
         self._check_game_over()
@@ -523,14 +595,24 @@ class GameManager:
     def _check_game_over(self) -> None:
         alive = [idx for idx, tank in enumerate(self.tanks) if tank.is_alive]
         if len(alive) == 1:
-            winner = alive[0] + 1
-            self.state = "game_over"
-            self.winner_text = f"Player {winner} wins"
-            self.winner_color = self.tanks[alive[0]].color
+            if self.state != "game_over":  # only trigger once
+                winner_idx = alive[0]
+                self.state = "game_over"
+                self.winner_text = f"Player {winner_idx + 1} wins"
+                self.winner_color = self.tanks[alive[0]].color
+                self._game_over_overlay = GameOverOverlay(winner_idx)
+                # Play victory music for the human player's perspective
+                if self.game_mode == "PVE" and alive[0] == 1:
+                    audio.play_music("lose", fade_ms=800)
+                else:
+                    audio.play_music("victory", fade_ms=800)
         elif len(alive) == 0:
-            self.state = "game_over"
-            self.winner_text = "Draw"
-            self.winner_color = (40, 40, 40)
+            if self.state != "game_over":
+                self.state = "game_over"
+                self.winner_text = "Draw"
+                self.winner_color = (40, 40, 40)
+                self._game_over_overlay = GameOverOverlay(None)
+                audio.play_music("lose", fade_ms=800)
 
     def _draw_world_decorations(self) -> None:
         """Draw lightweight scenery details so gameplay looks closer to the reference UI."""
@@ -559,13 +641,20 @@ class GameManager:
             pygame.draw.circle(self.screen, (97, 176, 72), (tx + 14, ty - 26), 16)
 
     def render(self) -> None:
-        self.screen.fill(SKY_BLUE)
+        bg = assets.get_image("bg/battlefield")
+        if bg is not None:
+            self.screen.blit(bg, (0, 0))
+        else:
+            self.screen.fill(SKY_BLUE)
 
         if self.state == "menu":
             self.menu.draw(self.screen)
             return
 
-        self._draw_world_decorations()
+        # Only draw primitive decorations when no background image is loaded
+        # (the image already contains clouds, sun, and scenery)
+        if bg is None:
+            self._draw_world_decorations()
 
         self.terrain.draw(self.screen)
 
@@ -602,8 +691,10 @@ class GameManager:
             self.aim_ready,
         )
 
-        if self.state == "game_over":
-            font = pygame.font.Font(None, 64)
-            text = font.render(self.winner_text + " - Press R to restart", True, self.winner_color)
-            rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
-            self.screen.blit(text, rect)
+        # Game-over animated overlay
+        if self.state == "game_over" and self._game_over_overlay is not None:
+            self._game_over_overlay.draw(self.screen)
+
+        # Pause overlay on top of everything else
+        if self.paused:
+            self.pause_menu.draw(self.screen)

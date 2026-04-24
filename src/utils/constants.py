@@ -13,7 +13,23 @@ ASSETS_DIR = PROJECT_ROOT / "assets"
 IMAGES_DIR = ASSETS_DIR / "images"
 SOUNDS_DIR = ASSETS_DIR / "sounds"
 FONTS_DIR = ASSETS_DIR / "fonts"
+
+# Image subdirectory paths
+IMAGES_BG_DIR      = IMAGES_DIR / "bg"
+IMAGES_TANKS_DIR   = IMAGES_DIR / "tanks"
+IMAGES_UI_DIR      = IMAGES_DIR / "ui"
+IMAGES_FX_DIR      = IMAGES_DIR / "fx"
+IMAGES_TERRAIN_DIR = IMAGES_DIR / "terrain"
+IMAGES_INGAME_DIR  = IMAGES_DIR / "in_game"
+IMAGES_ICONS_DIR   = IMAGES_DIR / "icons"
+
 TERRAIN_IMAGE_PATH = IMAGES_DIR / "terrain.png"
+
+# Font sizes (px) — use these named constants, not magic numbers
+FONT_SIZE_TITLE  = 52
+FONT_SIZE_NORMAL = 36
+FONT_SIZE_SMALL  = 28
+FONT_SIZE_TINY   = 22
 
 # World physics
 GRAVITY = 760.0

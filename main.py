@@ -3,14 +3,37 @@
 import pygame
 
 from src.core.game_manager import GameManager
+from src.utils.asset_manager import assets
+from src.utils.audio_manager import audio
 from src.utils.constants import FPS, HEIGHT, SCREEN_TITLE, WIDTH
+from src.utils.settings_store import settings
+from src.utils.strings import set_language
 
 
 def main() -> None:
     pygame.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+    # Load settings first (before display, so we can apply fullscreen)
+    settings.load()
+
+    # Apply display mode from saved settings
+    flags = pygame.FULLSCREEN if settings.fullscreen else 0
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
     pygame.display.set_caption(SCREEN_TITLE)
     clock = pygame.time.Clock()
+
+    # Apply language from saved settings
+    set_language(settings.language)
+
+    # Load all visual assets eagerly — must happen after display.set_mode()
+    assets.load_all()
+
+    # Initialise audio — must happen after pygame.init()
+    audio.init()
+
+    # Apply saved volume preferences immediately
+    audio.set_sfx_volume(settings.sfx_volume)
+    audio.set_music_volume(settings.music_volume)
 
     manager = GameManager(screen)
     running = True
@@ -28,6 +51,7 @@ def main() -> None:
         manager.render()
         pygame.display.flip()
 
+    audio.teardown()
     pygame.quit()
 
 

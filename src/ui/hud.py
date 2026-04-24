@@ -1,17 +1,54 @@
-"""Stylized HUD inspired by Gunny-like battle interface."""
+"""Stylized HUD inspired by Gunny-like battle interface.
+
+Phase 1 upgrade:
+- Custom font loaded via AssetManager (gunbai.ttf)
+- Static label surfaces pre-rendered in __init__() — not every frame
+- HUD panel frames loaded from ui/ sprites; fallback to pygame.draw primitives
+"""
 
 import pygame
 
 from src.entities.bullet import BulletType
 from src.entities.tank import Tank
-from src.utils.constants import BLACK, HEIGHT, SHOT_POWER_MAX, SHOT_POWER_MIN, WHITE, WIDTH
+from src.utils.asset_manager import assets
+from src.utils.constants import (
+    BLACK,
+    FONT_SIZE_NORMAL,
+    FONT_SIZE_SMALL,
+    FONT_SIZE_TINY,
+    HEIGHT,
+    SHOT_POWER_MAX,
+    SHOT_POWER_MIN,
+    WHITE,
+    WIDTH,
+)
 
 
 class HUD:
     def __init__(self) -> None:
-        self.font = pygame.font.Font(None, 36)
-        self.small_font = pygame.font.Font(None, 28)
-        self.tiny_font = pygame.font.Font(None, 24)
+        self.font       = assets.get_font(FONT_SIZE_NORMAL)
+        self.small_font = assets.get_font(FONT_SIZE_SMALL)
+        self.tiny_font  = assets.get_font(FONT_SIZE_TINY)
+
+        # Load panel images (may be None — fallback to primitives)
+        self._panel_left  = assets.get_image("ui/panel_left")
+        self._panel_right = assets.get_image("ui/panel_right")
+        self._shield_vs   = assets.get_image("ui/shield_vs")
+        self._power_bg    = assets.get_image("ui/power_bar_bg")
+
+        # Pre-render STATIC text labels — never re-render these each frame
+        self._lbl_wind  = self.font.render("Wind", True, (46, 76, 128))
+        self._lbl_power = self.font.render("Power", True, (70, 47, 30))
+        self._lbl_fuel  = self.font.render("Fuel", True, (82, 50, 32))
+        self._lbl_p1    = self.font.render("Player 1", True, WHITE)
+        self._lbl_p2    = self.font.render("Player 2", True, WHITE)
+
+        # Settings / pause button rect — used by GameManager for click detection
+        self.menu_btn_rect = pygame.Rect(31, 33, 62, 62)
+
+    # ------------------------------------------------------------------
+    # Bar helper
+    # ------------------------------------------------------------------
 
     def _draw_rounded_bar(
         self,
@@ -33,41 +70,75 @@ class HUD:
 
         pygame.draw.rect(screen, frame_color, rect, width=3, border_radius=12)
 
+    # ------------------------------------------------------------------
+    # Top health bars
+    # ------------------------------------------------------------------
+
     def _draw_top_health(self, screen: pygame.Surface, left_tank: Tank, right_tank: Tank) -> None:
-        left_label = self.font.render("Name", True, WHITE)
-        right_label = self.font.render("Name", True, WHITE)
+        left_rect  = pygame.Rect(200, 10, 340, 80)
+        right_rect = pygame.Rect(WIDTH - 540, 10, 340, 80)
 
-        screen.blit(left_label, (210, 18))
-        screen.blit(right_label, (WIDTH - 318, 18))
+        # Panel backgrounds (sprite or fallback)
+        if self._panel_left is not None:
+            screen.blit(self._panel_left, left_rect.topleft)
+        else:
+            pygame.draw.rect(screen, (18, 28, 52, 180), left_rect, border_radius=14)
+            pygame.draw.rect(screen, (47, 123, 178), left_rect, width=3, border_radius=14)
 
-        left_rect = pygame.Rect(200, 54, 340, 56)
-        right_rect = pygame.Rect(WIDTH - 540, 54, 340, 56)
+        if self._panel_right is not None:
+            screen.blit(self._panel_right, right_rect.topleft)
+        else:
+            pygame.draw.rect(screen, (18, 28, 52, 180), right_rect, border_radius=14)
+            pygame.draw.rect(screen, (186, 67, 86), right_rect, width=3, border_radius=14)
 
-        self._draw_rounded_bar(screen, left_rect, left_tank.hp / 100.0, (77, 226, 62), (47, 123, 178))
-        self._draw_rounded_bar(screen, right_rect, right_tank.hp / 100.0, (231, 66, 66), (186, 67, 86))
+        # Player name labels (pre-rendered statics)
+        screen.blit(self._lbl_p1, (left_rect.left + 12, left_rect.top + 6))
+        screen.blit(self._lbl_p2, (right_rect.left + 12, right_rect.top + 6))
+
+        # HP bars (dynamic — drawn every frame because HP changes)
+        bar_left  = pygame.Rect(left_rect.left + 8,   left_rect.top + 38, left_rect.width - 16, 32)
+        bar_right = pygame.Rect(right_rect.left + 8,  right_rect.top + 38, right_rect.width - 16, 32)
+        self._draw_rounded_bar(screen, bar_left,  left_tank.hp / 100.0,  (77, 226, 62),  (47, 123, 178))
+        self._draw_rounded_bar(screen, bar_right, right_tank.hp / 100.0, (231, 66, 66), (186, 67, 86))
+
+    # ------------------------------------------------------------------
+    # VS shield
+    # ------------------------------------------------------------------
 
     def _draw_vs_shield(self, screen: pygame.Surface) -> None:
         center = (WIDTH // 2, 70)
-        shield = pygame.Surface((130, 130), pygame.SRCALPHA)
-        points = [(65, 10), (114, 25), (104, 94), (65, 120), (26, 94), (16, 25)]
-        pygame.draw.polygon(shield, (52, 124, 210), points)
-        pygame.draw.polygon(shield, (226, 62, 75), [(65, 10), (114, 25), (104, 94), (65, 120)])
-        pygame.draw.polygon(shield, (225, 236, 247), points, width=5)
+        if self._shield_vs is not None:
+            rect = self._shield_vs.get_rect(center=center)
+            screen.blit(self._shield_vs, rect)
+            # VS text drawn on top (dynamic-ish but cheap)
+            text = self.font.render("VS", True, WHITE)
+            screen.blit(text, text.get_rect(center=center))
+        else:
+            # Fallback: original polygon drawing
+            shield = pygame.Surface((130, 130), pygame.SRCALPHA)
+            pts = [(65, 10), (114, 25), (104, 94), (65, 120), (26, 94), (16, 25)]
+            pygame.draw.polygon(shield, (52, 124, 210), pts)
+            pygame.draw.polygon(shield, (226, 62, 75), [(65, 10), (114, 25), (104, 94), (65, 120)])
+            pygame.draw.polygon(shield, (225, 236, 247), pts, width=5)
+            text = self.font.render("VS", True, WHITE)
+            shield.blit(text, text.get_rect(center=(66, 62)))
+            screen.blit(shield, (center[0] - 65, center[1] - 56))
 
-        text = self.font.render("VS", True, WHITE)
-        shield.blit(text, text.get_rect(center=(66, 62)))
-        screen.blit(shield, (center[0] - 65, center[1] - 56))
+    # ------------------------------------------------------------------
+    # Wind indicator
+    # ------------------------------------------------------------------
 
     def _draw_wind_center(self, screen: pygame.Surface, wind: float) -> None:
-        text = self.font.render("Wind", True, (46, 76, 128))
-        screen.blit(text, (WIDTH // 2 - text.get_width() // 2, 142))
+        # Static label (pre-rendered) — blit directly
+        screen.blit(self._lbl_wind, (WIDTH // 2 - self._lbl_wind.get_width() // 2, 142))
 
+        # Dynamic: arrow + value (changes every turn)
         ratio = max(-1.0, min(1.0, wind / 85.0))
         arrow_len = int(95 * abs(ratio))
         direction = 1 if wind >= 0 else -1
 
         start = (WIDTH // 2, 186)
-        end = (WIDTH // 2 + direction * max(26, arrow_len), 186)
+        end   = (WIDTH // 2 + direction * max(26, arrow_len), 186)
         color = (47, 121, 224)
         pygame.draw.line(screen, color, start, end, 6)
         wing_a = (end[0] - 14 * direction, end[1] - 10)
@@ -77,35 +148,38 @@ class HUD:
         wind_value = self.font.render(f"{abs(wind) / 100:.1f}".replace(".", ","), True, (30, 62, 110))
         screen.blit(wind_value, (WIDTH // 2 - wind_value.get_width() // 2, 202))
 
+    # ------------------------------------------------------------------
+    # Side icon buttons
+    # ------------------------------------------------------------------
+
     def _draw_side_controls(self, screen: pygame.Surface) -> None:
-        x = 62
-        for idx, color in enumerate([(54, 141, 220), (77, 176, 233), (56, 154, 223)]):
-            y = 64 + idx * 92
-            pygame.draw.circle(screen, color, (x, y), 31)
-            pygame.draw.circle(screen, (31, 90, 144), (x, y), 31, width=3)
+        """Draw the single ☰ settings/pause button (top-left)."""
+        x, y = self.menu_btn_rect.centerx, self.menu_btn_rect.centery
+        pygame.draw.circle(screen, (54, 141, 220), (x, y), 31)
+        pygame.draw.circle(screen, (31, 90, 144), (x, y), 31, width=3)
+        # Three-line hamburger icon
+        for dy in (-10, 0, 10):
+            pygame.draw.line(screen, WHITE, (x - 18, y + dy), (x + 18, y + dy), 4)
 
-        # Minimal icon marks
-        pygame.draw.line(screen, WHITE, (44, 64), (80, 64), 4)
-        pygame.draw.line(screen, WHITE, (44, 54), (80, 54), 4)
-        pygame.draw.line(screen, WHITE, (44, 74), (80, 74), 4)
-
-        pygame.draw.circle(screen, WHITE, (62, 156), 12, width=3)
-        pygame.draw.rect(screen, WHITE, (74, 165, 8, 8), border_radius=2)
-
-        pygame.draw.polygon(screen, (255, 208, 78), [(52, 246), (78, 258), (52, 270)])
-        pygame.draw.circle(screen, WHITE, (79, 246), 4)
+    # ------------------------------------------------------------------
+    # Power column
+    # ------------------------------------------------------------------
 
     def _draw_power_column(self, screen: pygame.Surface, charge_power: float, is_charging: bool) -> None:
         col_rect = pygame.Rect(32, 282, 44, 248)
-        pygame.draw.rect(screen, (30, 75, 138), col_rect.inflate(10, 10), border_radius=16)
-        pygame.draw.rect(screen, (24, 61, 116), col_rect, border_radius=12)
+
+        if self._power_bg is not None:
+            bg_rect = self._power_bg.get_rect(center=col_rect.inflate(20, 22).center)
+            screen.blit(self._power_bg, bg_rect)
+        else:
+            pygame.draw.rect(screen, (30, 75, 138), col_rect.inflate(10, 10), border_radius=16)
+            pygame.draw.rect(screen, (24, 61, 116), col_rect, border_radius=12)
 
         ratio = max(0.0, min(1.0, (charge_power - SHOT_POWER_MIN) / (SHOT_POWER_MAX - SHOT_POWER_MIN)))
         fill_h = int(col_rect.height * ratio)
         fill_rect = pygame.Rect(col_rect.left + 5, col_rect.bottom - 5 - fill_h, col_rect.width - 10, fill_h)
 
         if fill_h > 0:
-            # Fake gradient using a few slices from green to red.
             slices = [
                 (90, 233, 96),
                 (208, 236, 79),
@@ -123,19 +197,25 @@ class HUD:
                 pygame.draw.rect(screen, color, (fill_rect.left, y, fill_rect.width, h), border_radius=6)
 
         pygame.draw.rect(screen, (125, 188, 235), col_rect, width=3, border_radius=12)
-        label = self.font.render("Power", True, (70, 47, 30))
-        screen.blit(label, (14, 542))
 
+        # Static "Power" label (pre-rendered)
+        screen.blit(self._lbl_power, (14, 542))
+
+        # Dynamic state text
         state = "Charging" if is_charging else "Ready"
         state_txt = self.tiny_font.render(state, True, (35, 63, 100))
         screen.blit(state_txt, (18, 570))
+
+    # ------------------------------------------------------------------
+    # Fuel bar near active tank
+    # ------------------------------------------------------------------
 
     def _draw_fuel_near_current_tank(self, screen: pygame.Surface, tank: Tank) -> None:
         x = int(tank.x) - 64
         y = int(tank.y) - 126
 
-        text = self.font.render("Fuel", True, (82, 50, 32))
-        screen.blit(text, (x + 24, y - 18))
+        # Static "Fuel" label
+        screen.blit(self._lbl_fuel, (x + 24, y - 18))
 
         rect = pygame.Rect(x, y + 18, 138, 34)
         pygame.draw.rect(screen, (43, 111, 190), rect, border_radius=10)
@@ -149,8 +229,11 @@ class HUD:
                 (rect.left + 6, rect.top + 6, value_w, rect.height - 12),
                 border_radius=7,
             )
-
         pygame.draw.rect(screen, (119, 186, 232), rect, width=3, border_radius=10)
+
+    # ------------------------------------------------------------------
+    # Ammo chip
+    # ------------------------------------------------------------------
 
     def _draw_ammo_chip(self, screen: pygame.Surface, bullet_type: BulletType) -> None:
         chip = pygame.Rect(WIDTH // 2 - 170, HEIGHT - 52, 340, 38)
@@ -163,6 +246,10 @@ class HUD:
             (35, 54, 86),
         )
         screen.blit(txt, (chip.centerx - txt.get_width() // 2, chip.top + 7))
+
+    # ------------------------------------------------------------------
+    # Main draw entry point
+    # ------------------------------------------------------------------
 
     def draw(
         self,

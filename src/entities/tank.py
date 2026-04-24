@@ -6,6 +6,7 @@ import math
 import pygame
 
 from src.core.terrain import Terrain
+from src.utils.asset_manager import assets
 from src.utils.constants import (
     FUEL_COST_PER_PIXEL,
     GRAVITY,
@@ -132,7 +133,10 @@ class Tank:
         )
 
     def _build_sprite(self) -> tuple[pygame.Surface, pygame.Rect]:
-        """Build and rotate tank sprite so mask collision matches what player sees."""
+        """Build and rotate tank sprite so mask collision matches what player sees.
+
+        Falls back to pygame.draw primitives when sprites are unavailable.
+        """
         sprite_w = 120
         sprite_h = 80
         sprite = pygame.Surface((sprite_w, sprite_h), pygame.SRCALPHA)
@@ -148,25 +152,63 @@ class Tank:
         pygame.draw.rect(sprite, self.color, body_rect, border_radius=6)
         pygame.draw.circle(sprite, self.color, (cx, cy - 8), TANK_TURRET_RADIUS)
 
-        # Cannon is drawn in world-space orientation; body stays terrain-aligned.
         rotated = pygame.transform.rotozoom(sprite, -self.slope_angle_deg, 1.0)
         rect = rotated.get_rect(center=(int(self.x), int(self.y - 18)))
         return rotated, rect
 
+    def _color_key(self) -> str:
+        """Return 'green' or 'red' asset key prefix based on tank color."""
+        from src.utils.constants import GREEN, RED
+        if self.color == RED:
+            return "red"
+        return "green"  # default / player 1
+
     def get_mask_and_rect(self) -> tuple[pygame.Mask, pygame.Rect]:
+        # Collision always uses the body layer (or fallback sprite)
+        ck = self._color_key()
+        body_img = assets.get_image(f"tanks/tank_{ck}_body")
+        if body_img is not None:
+            rotated = pygame.transform.rotozoom(body_img, -self.slope_angle_deg, 1.0)
+            rect = rotated.get_rect(center=(int(self.x), int(self.y - 18)))
+            return pygame.mask.from_surface(rotated), rect
+        # Fallback to procedural sprite for collision
         sprite, rect = self._build_sprite()
         return pygame.mask.from_surface(sprite), rect
 
     def draw(self, surface: pygame.Surface) -> None:
-        sprite, rect = self._build_sprite()
-        surface.blit(sprite, rect)
+        ck = self._color_key()
+        body_img    = assets.get_image(f"tanks/tank_{ck}_body")
+        turret_img  = assets.get_image(f"tanks/tank_{ck}_turret")
+        barrel_img  = assets.get_image(f"tanks/tank_{ck}_barrel")
 
+        if body_img is None or turret_img is None or barrel_img is None:
+            # ---- FALLBACK: original procedural drawing ----
+            sprite, rect = self._build_sprite()
+            surface.blit(sprite, rect)
+            turret_x, turret_y = self.get_turret_base_pos()
+            tip_x, tip_y = self.get_barrel_tip()
+            pygame.draw.line(
+                surface,
+                (25, 25, 25),
+                (int(turret_x), int(turret_y)),
+                (int(tip_x), int(tip_y)),
+                5,
+            )
+            return
+
+        # ---- Layer 1: Body (rotates with terrain slope) ----
+        body_rot  = pygame.transform.rotozoom(body_img, -self.slope_angle_deg, 1.0)
+        body_rect = body_rot.get_rect(center=(int(self.x), int(self.y - 14)))
+        surface.blit(body_rot, body_rect)
+
+        # ---- Layer 2: Turret (no rotation — always level) ----
         turret_x, turret_y = self.get_turret_base_pos()
-        tip_x, tip_y = self.get_barrel_tip()
-        pygame.draw.line(
-            surface,
-            (25, 25, 25),
-            (int(turret_x), int(turret_y)),
-            (int(tip_x), int(tip_y)),
-            5,
-        )
+        turret_rect = turret_img.get_rect(center=(int(turret_x), int(turret_y)))
+        surface.blit(turret_img, turret_rect)
+
+        # ---- Layer 3: Barrel (rotates by aim_angle_deg around turret center) ----
+        # Barrel image has transparent padding on the left so image-center == hinge point.
+        # aim_angle_deg follows math convention (CCW from +X), pygame rotozoom positive = CCW → match directly.
+        barrel_rot  = pygame.transform.rotozoom(barrel_img, self.aim_angle_deg, 1.0)
+        barrel_rect = barrel_rot.get_rect(center=(int(turret_x), int(turret_y)))
+        surface.blit(barrel_rot, barrel_rect)
