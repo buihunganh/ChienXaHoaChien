@@ -35,7 +35,7 @@ class MainMenu:
         self.small_font = assets.get_font(FONT_SIZE_SMALL)
 
         self.selected_mode = "PVP"
-        self.selected_difficulty = "Trung binh"
+        self.selected_difficulty = "Medium"
 
         self._home_buttons = self._build_home_buttons()
         self._mode_buttons = self._build_mode_buttons()
@@ -64,7 +64,7 @@ class MainMenu:
 
         return [
             MenuButton(
-                label="Bat dau",
+                label=t("menu_start"),
                 rect=pygame.Rect(center_x - width // 2, start_y, width, height),
                 fill_top=(167, 228, 83),
                 fill_bottom=(86, 182, 58),
@@ -72,7 +72,7 @@ class MainMenu:
                 action="go_mode",
             ),
             MenuButton(
-                label="Cai dat",
+                label=t("menu_settings"),
                 rect=pygame.Rect(center_x - width // 2, start_y + (height + gap), width, height),
                 fill_top=(108, 213, 252),
                 fill_bottom=(45, 148, 229),
@@ -80,7 +80,7 @@ class MainMenu:
                 action="go_settings",
             ),
             MenuButton(
-                label="Huong dan",
+                label=t("menu_guide"),
                 rect=pygame.Rect(center_x - width // 2, start_y + 2 * (height + gap), width, height),
                 fill_top=(255, 234, 111),
                 fill_bottom=(244, 180, 55),
@@ -101,7 +101,7 @@ class MainMenu:
                 fill_bottom=(214, 72, 26),
                 border=(155, 46, 19),
                 action="mode_pvp",
-                subtitle="Doi dau 2 nguoi choi",
+                subtitle=t("mode_pvp_sub"),
             ),
             MenuButton(
                 label="PVE",
@@ -110,7 +110,7 @@ class MainMenu:
                 fill_bottom=(241, 196, 56),
                 border=(171, 128, 30),
                 action="mode_pve",
-                subtitle="Dau voi may (AI)",
+                subtitle=t("mode_pve_sub"),
             ),
         ]
 
@@ -122,7 +122,7 @@ class MainMenu:
         start_y = 156
         return [
             MenuButton(
-                label="De",
+                label=t("diff_easy"),
                 rect=pygame.Rect(center_x - width // 2, start_y, width, height),
                 fill_top=(170, 228, 89),
                 fill_bottom=(84, 180, 56),
@@ -130,7 +130,7 @@ class MainMenu:
                 action="difficulty_easy",
             ),
             MenuButton(
-                label="Trung binh",
+                label=t("diff_medium"),
                 rect=pygame.Rect(center_x - width // 2, start_y + (height + gap), width, height),
                 fill_top=(108, 212, 252),
                 fill_bottom=(46, 150, 230),
@@ -138,7 +138,7 @@ class MainMenu:
                 action="difficulty_medium",
             ),
             MenuButton(
-                label="Kho",
+                label=t("diff_hard"),
                 rect=pygame.Rect(center_x - width // 2, start_y + 2 * (height + gap), width, height),
                 fill_top=(255, 234, 112),
                 fill_bottom=(244, 183, 58),
@@ -175,7 +175,7 @@ class MainMenu:
                     fill_bottom=(67, 170, 236),
                     border=(49, 116, 181),
                     action=action,
-                    subtitle="Chua mo khoa" if idx == 1 else "San sang",
+                    subtitle=t("level_locked") if idx == 1 else t("level_ready"),
                 )
             )
 
@@ -277,11 +277,11 @@ class MainMenu:
             for btn in self._difficulty_buttons:
                 if btn.rect.collidepoint(pos):
                     if btn.action == "difficulty_easy":
-                        self.selected_difficulty = "De"
+                        self.selected_difficulty = "Easy"
                     elif btn.action == "difficulty_medium":
-                        self.selected_difficulty = "Trung binh"
+                        self.selected_difficulty = "Medium"
                     else:
-                        self.selected_difficulty = "Kho"
+                        self.selected_difficulty = "Hard"
                     self.state = "levels"
                     return None
 
@@ -322,33 +322,18 @@ class MainMenu:
         screen.blit(outline, (WIDTH // 2 - outline.get_width() // 2 - 3, 34))
         screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 40))
 
-    def _draw_settings(self, screen: pygame.Surface) -> None:
-        self._draw_top_title(screen, "Cai dat")
-        panel = pygame.Rect(WIDTH // 2 - 390, 170, 780, 380)
-        pygame.draw.rect(screen, (252, 252, 246), panel, border_radius=28)
-        pygame.draw.rect(screen, (92, 130, 155), panel, width=4, border_radius=28)
-
-        lines = [
-            "Muc nay dang o che do mo phong giao dien.",
-            "Ban co the them am thanh, nhac nen, do hoa va dieu khien.",
-            "Phim ESC hoac nut Back de quay lai.",
-        ]
-        for idx, line in enumerate(lines):
-            text = self.text_font.render(line, True, (36, 56, 72))
-            screen.blit(text, (panel.left + 52, panel.top + 86 + idx * 54))
-
     def _draw_guide(self, screen: pygame.Surface) -> None:
-        self._draw_top_title(screen, "Huong dan")
+        self._draw_top_title(screen, t("guide_title"))
         panel = pygame.Rect(WIDTH // 2 - 420, 148, 840, 420)
         pygame.draw.rect(screen, (251, 250, 240), panel, border_radius=28)
         pygame.draw.rect(screen, (176, 133, 53), panel, width=4, border_radius=28)
 
         rules = [
-            "1. Mui ten trai/phai de di chuyen xe tang (ton nhien lieu).",
-            "2. Mui ten len/xuong (hoac W/S) de dieu chinh goc nong sung.",
-            "3. Nhan giu Space de canh luc, tha Space de ban.",
-            "4. Gio va loai dan ngau nhien thay doi moi luot.",
-            "5. Ha HP doi thu ve 0 de chien thang.",
+            t("guide_line1"),
+            t("guide_line2"),
+            t("guide_line3"),
+            t("guide_line4"),
+            t("guide_line5"),
         ]
         for idx, rule in enumerate(rules):
             text = self.text_font.render(rule, True, (40, 54, 67))
@@ -370,7 +355,7 @@ class MainMenu:
         self._draw_button(screen, self.back_button)
 
         if self.state == "mode":
-            self._draw_top_title(screen, "Che do")
+            self._draw_top_title(screen, t("mode_title"))
             for btn in self._mode_buttons:
                 active = (btn.action == "mode_pvp" and self.selected_mode == "PVP") or (
                     btn.action == "mode_pve" and self.selected_mode == "PVE"
@@ -379,20 +364,20 @@ class MainMenu:
             return
 
         if self.state == "difficulty":
-            self._draw_top_title(screen, "Do kho")
+            self._draw_top_title(screen, t("diff_title"))
             for btn in self._difficulty_buttons:
                 active = (
-                    (btn.action == "difficulty_easy" and self.selected_difficulty == "De")
-                    or (btn.action == "difficulty_medium" and self.selected_difficulty == "Trung binh")
-                    or (btn.action == "difficulty_hard" and self.selected_difficulty == "Kho")
+                    (btn.action == "difficulty_easy" and self.selected_difficulty == "Easy")
+                    or (btn.action == "difficulty_medium" and self.selected_difficulty == "Medium")
+                    or (btn.action == "difficulty_hard" and self.selected_difficulty == "Hard")
                 )
                 self._draw_button(screen, btn, active=active)
             return
 
         if self.state == "levels":
-            self._draw_top_title(screen, "Man choi")
+            self._draw_top_title(screen, t("level_title"))
             mode_text = self.small_font.render(
-                f"Mode: {self.selected_mode} | Do kho: {self.selected_difficulty}",
+                f"{t('mode_title')}: {self.selected_mode} | {t('diff_title')}: {self.selected_difficulty}",
                 True,
                 (38, 70, 98),
             )

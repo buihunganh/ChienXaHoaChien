@@ -46,7 +46,7 @@ class GameManager:
         audio.play_music("menu")  # start BGM immediately on launch / restart
 
         self.game_mode = "PVP"
-        self.difficulty = "Trung binh"
+        self.difficulty = "Medium"
 
         self.wind = random.uniform(WIND_MIN, WIND_MAX)
         self.turn_index = 0
@@ -117,6 +117,9 @@ class GameManager:
             result = self.pause_menu.handle_event(event)
             if result == "resume":
                 self.paused = False
+            elif result == "main_menu":
+                self.paused = False
+                self.__init__(self.screen)
             return
 
         if self.state == "game_over" and event.type == pygame.KEYDOWN and event.key == pygame.K_r:
@@ -424,9 +427,9 @@ class GameManager:
         return best_angle, best_power, 0.28, 0.62
 
     def _plan_bot_shot(self, shooter: Tank, target: Tank, target_idx: int) -> None:
-        if self.difficulty == "De":
+        if self.difficulty == "Easy":
             angle, power, delay_min, delay_max = self._plan_easy_lookup_shot(shooter, target)
-        elif self.difficulty == "Kho":
+        elif self.difficulty == "Hard":
             angle, power, delay_min, delay_max = self._plan_hard_refined_shot(shooter, target, target_idx)
         else:
             angle, power, delay_min, delay_max = self._plan_medium_heuristic_shot(shooter, target, target_idx)

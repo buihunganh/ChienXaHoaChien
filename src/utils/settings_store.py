@@ -27,7 +27,6 @@ _DEFAULTS: dict = {
     "sfx_volume":   0.8,
     "music_volume": 0.5,
     "fullscreen":   False,
-    "language":     "vi",   # "vi" or "en"
 }
 
 
@@ -96,17 +95,6 @@ class SettingsStore:
     def fullscreen(self, value: bool) -> None:
         self._data["fullscreen"] = bool(value)
         self.save()
-
-    @property
-    def language(self) -> str:
-        lang = self._data.get("language", _DEFAULTS["language"])
-        return lang if lang in ("vi", "en") else "vi"
-
-    @language.setter
-    def language(self, value: str) -> None:
-        if value in ("vi", "en"):
-            self._data["language"] = value
-            self.save()
 
 
 # Module-level singleton

@@ -38,14 +38,11 @@ _IMAGE_REGISTRY: dict[str, str] = {
     # Icons
     "icons/volume":   "icons/volume_icon.png",
     "icons/victory":  "icons/Victory_popup_sign.png",
-    "icons/lose":     "icons/Lose_popup_sign.jpg",
+    "icons/lose":     "icons/Lose_popup_sign.png",
 }
 
 # Images that are loaded WITHOUT alpha and scaled to screen (solid full-screen backgrounds)
 _SOLID_BG_KEYS: frozenset[str] = frozenset({"bg/battlefield", "bg/main_menu"})
-
-# Images that need convert() but must NOT be scaled (JPG icons, no alpha channel)
-_SOLID_NO_ALPHA_KEYS: frozenset[str] = frozenset({"icons/lose"})
 
 # Font size variants to pre-load
 _FONT_SIZES: tuple[int, ...] = (22, 28, 36, 52, 64)
@@ -118,9 +115,6 @@ class AssetManager:
                     # Scale to screen size once at load time — free at render time
                     if surface.get_size() != (WIDTH, HEIGHT):
                         surface = pygame.transform.scale(surface, (WIDTH, HEIGHT))
-                elif key in _SOLID_NO_ALPHA_KEYS:
-                    # JPG / no-alpha images: use convert() without scaling
-                    surface = raw.convert()
                 else:
                     surface = raw.convert_alpha()
                 self._images[key] = surface

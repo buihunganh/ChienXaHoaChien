@@ -7,7 +7,6 @@ from src.utils.asset_manager import assets
 from src.utils.audio_manager import audio
 from src.utils.constants import FPS, HEIGHT, SCREEN_TITLE, WIDTH
 from src.utils.settings_store import settings
-from src.utils.strings import set_language
 
 
 def main() -> None:
@@ -21,9 +20,6 @@ def main() -> None:
     screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
     pygame.display.set_caption(SCREEN_TITLE)
     clock = pygame.time.Clock()
-
-    # Apply language from saved settings
-    set_language(settings.language)
 
     # Load all visual assets eagerly — must happen after display.set_mode()
     assets.load_all()

@@ -80,9 +80,6 @@ class GameOverOverlay:
         else:
             self._popup = None
 
-        # Flag: Lose JPG has a white background we hide behind a dark card
-        self._needs_card = (self._img_key == "icons/lose")
-
         self.font       = assets.get_font(FONT_SIZE_NORMAL)
         self.small_font = assets.get_font(FONT_SIZE_SMALL)
 
@@ -137,17 +134,6 @@ class GameOverOverlay:
             else:
                 img_to_blit = self._popup
                 blit_rect   = dest_rect
-
-            # For JPG lose sign: draw a dark rounded card first to hide white background
-            if self._needs_card:
-                card_padding = 24
-                card_rect = blit_rect.inflate(card_padding * 2, card_padding)
-                card_surf = pygame.Surface(card_rect.size, pygame.SRCALPHA)
-                pygame.draw.rect(card_surf, (22, 30, 60, 230),
-                                 card_surf.get_rect(), border_radius=24)
-                pygame.draw.rect(card_surf, (60, 90, 160, 200),
-                                 card_surf.get_rect(), width=3, border_radius=24)
-                screen.blit(card_surf, card_rect.topleft)
 
             screen.blit(img_to_blit, blit_rect)
 

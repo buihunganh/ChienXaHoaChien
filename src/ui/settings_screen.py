@@ -21,6 +21,7 @@ from src.utils.settings_store import settings
 from src.utils.strings import t
 
 
+
 # ---------------------------------------------------------------------------
 # Colours
 # ---------------------------------------------------------------------------
@@ -38,6 +39,10 @@ _TEXT_DIM     = (140, 160, 200)
 _SAVE_BTN_TOP = (100, 210, 90)
 _SAVE_BTN_BOT = (55, 158, 50)
 _SAVE_BORDER  = (38, 115, 38)
+
+_MAIN_TOP = (200, 72, 72)
+_MAIN_BOT = (148, 42, 42)
+_MAIN_BDR = (110, 28, 28)
 
 
 class Slider:
@@ -119,7 +124,8 @@ class SettingsScreen:
     _PANEL_W = 700
     _PANEL_H = 520
 
-    def __init__(self) -> None:
+    def __init__(self, in_game: bool = False) -> None:
+        self.in_game = in_game
         self.font       = assets.get_font(FONT_SIZE_NORMAL)
         self.small_font = assets.get_font(FONT_SIZE_SMALL)
         self.title_font = assets.get_font(FONT_SIZE_TITLE)
@@ -138,10 +144,14 @@ class SettingsScreen:
         # Toggle rect (fullscreen)
         self._toggle_rect = pygame.Rect(px + self._PANEL_W - 100, py + 300, 70, 34)
 
-
-        # Save & Close button
-        btn_w = 220
-        self._save_rect = pygame.Rect(cx - btn_w // 2, py + self._PANEL_H - 70, btn_w, 50)
+        # Save & Close button(s)
+        btn_w = 260
+        if self.in_game:
+            gap = 16
+            self._save_rect = pygame.Rect(cx - btn_w - gap // 2, py + self._PANEL_H - 70, btn_w, 50)
+            self._main_menu_rect = pygame.Rect(cx + gap // 2, py + self._PANEL_H - 70, btn_w, 50)
+        else:
+            self._save_rect = pygame.Rect(cx - btn_w // 2, py + self._PANEL_H - 70, btn_w, 50)
 
         # Panel rect (for background)
         self._panel_rect = pygame.Rect(px, py, self._PANEL_W, self._PANEL_H)
@@ -170,11 +180,15 @@ class SettingsScreen:
             if self._toggle_rect.collidepoint(event.pos):
                 settings.fullscreen = not settings.fullscreen
                 self._apply_fullscreen(settings.fullscreen)
-
-            # Save & Close
+            # Save & Close / Save & Resume
             if self._save_rect.collidepoint(event.pos):
                 settings.save()
-                return "close"
+                return "resume" if self.in_game else "close"
+
+            # Main Menu
+            if self.in_game and self._main_menu_rect.collidepoint(event.pos):
+                settings.save()
+                return "main_menu"
 
         return None
 
@@ -210,10 +224,12 @@ class SettingsScreen:
         fs_lbl = self.font.render(t("settings_fullscreen"), True, _TEXT_MAIN)
         screen.blit(fs_lbl, (px + 40, py + 308))
         self._draw_toggle(screen, settings.fullscreen)
-
-
-        # Save & Close button
-        self._draw_save_button(screen)
+        # Bottom Buttons
+        if self.in_game:
+            self._draw_btn(screen, self._save_rect, _SAVE_BTN_TOP, _SAVE_BTN_BOT, _SAVE_BORDER, t("settings_save_resume"))
+            self._draw_btn(screen, self._main_menu_rect, _MAIN_TOP, _MAIN_BOT, _MAIN_BDR, t("menu_quit_to_main"))
+        else:
+            self._draw_btn(screen, self._save_rect, _SAVE_BTN_TOP, _SAVE_BTN_BOT, _SAVE_BORDER, t("settings_save"))
 
     # ------------------------------------------------------------------
     # Private drawing helpers
@@ -241,18 +257,16 @@ class SettingsScreen:
             tx = self._toggle_rect.right - state_txt.get_width() - 22
         screen.blit(state_txt, (tx, hy - state_txt.get_height() // 2))
 
-
-    def _draw_save_button(self, screen: pygame.Surface) -> None:
-        r = self._save_rect
+    def _draw_btn(self, screen: pygame.Surface, r: pygame.Rect, top_col: tuple, bot_col: tuple, bdr_col: tuple, text: str) -> None:
         half = r.height // 2
         top_r = pygame.Rect(r.left, r.top, r.width, half)
         bot_r = pygame.Rect(r.left, r.top + half, r.width, r.height - half)
-        pygame.draw.rect(screen, _SAVE_BTN_TOP, top_r,
+        pygame.draw.rect(screen, top_col, top_r,
                          border_top_left_radius=25, border_top_right_radius=25)
-        pygame.draw.rect(screen, _SAVE_BTN_BOT, bot_r,
+        pygame.draw.rect(screen, bot_col, bot_r,
                          border_bottom_left_radius=25, border_bottom_right_radius=25)
-        pygame.draw.rect(screen, _SAVE_BORDER, r, width=3, border_radius=25)
-        lbl = self.font.render(t("settings_save"), True, (20, 40, 20))
+        pygame.draw.rect(screen, bdr_col, r, width=3, border_radius=25)
+        lbl = self.font.render(text, True, (20, 40, 20) if top_col == _SAVE_BTN_TOP else (40, 10, 10))
         screen.blit(lbl, lbl.get_rect(center=r.center))
 
     @staticmethod
