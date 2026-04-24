@@ -37,12 +37,12 @@ class Bullet:
     explosion_radius: int = 44
     color: tuple[int, int, int] = (30, 30, 30)
 
-    def update(self, dt: float, wind_acc: float) -> None:
+    def update(self, dt: float, wind_acc: float, gravity: float = GRAVITY) -> None:
         if not self.alive:
             return
 
         self.vx += wind_acc * dt
-        self.vy += GRAVITY * dt
+        self.vy += gravity * dt
         self.x += self.vx * dt
         self.y += self.vy * dt
 

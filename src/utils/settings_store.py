@@ -27,6 +27,7 @@ _DEFAULTS: dict = {
     "sfx_volume":   0.8,
     "music_volume": 0.5,
     "fullscreen":   False,
+    "max_unlocked_level": 1,
 }
 
 
@@ -94,6 +95,15 @@ class SettingsStore:
     @fullscreen.setter
     def fullscreen(self, value: bool) -> None:
         self._data["fullscreen"] = bool(value)
+        self.save()
+
+    @property
+    def max_unlocked_level(self) -> int:
+        return int(self._data.get("max_unlocked_level", _DEFAULTS["max_unlocked_level"]))
+
+    @max_unlocked_level.setter
+    def max_unlocked_level(self, value: int) -> None:
+        self._data["max_unlocked_level"] = max(1, min(6, int(value)))
         self.save()
 
 

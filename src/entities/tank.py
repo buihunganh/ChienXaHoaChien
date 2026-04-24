@@ -49,7 +49,7 @@ class Tank:
             return
         self.aim_angle_deg = math.degrees(math.atan2(-dy, dx))
 
-    def move_horizontal(self, direction: float, dt: float, terrain: Terrain) -> None:
+    def move_horizontal(self, direction: float, dt: float, terrain: Terrain, fuel_cost: float = FUEL_COST_PER_PIXEL) -> None:
         """
         Move along X with snap-to-ground and step-up handling.
 
@@ -77,7 +77,7 @@ class Tank:
             return
 
         self.x = candidate_x
-        self.fuel = max(0.0, self.fuel - abs(dx) * FUEL_COST_PER_PIXEL)
+        self.fuel = max(0.0, self.fuel - abs(dx) * fuel_cost)
         self.snap_to_ground(terrain)
 
     def snap_to_ground(self, terrain: Terrain) -> None:
@@ -101,14 +101,14 @@ class Tank:
             math.atan2((right_ground - left_ground), (half_track * 2.0))
         )
 
-    def apply_gravity(self, dt: float, terrain: Terrain) -> None:
+    def apply_gravity(self, dt: float, terrain: Terrain, gravity: float = GRAVITY) -> None:
         """Free-fall when not supported by terrain directly under the tracks."""
         if not self.is_alive:
             return
 
         # Probe below the track center. If no solid pixel right under it, tank falls.
         if not terrain.is_solid_at(self.x, self.y + 2):
-            self.vy += GRAVITY * dt
+            self.vy += gravity * dt
             self.y += self.vy * dt
 
             landed = terrain.get_surface_y(self.x, int(max(0, self.y - 10)))

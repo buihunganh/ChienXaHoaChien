@@ -50,26 +50,28 @@ def _ease_out_bounce(t: float) -> float:
 class GameOverOverlay:
     """Stateful animated overlay — create once when game_over is triggered."""
 
-    def __init__(self, winner_idx: int | None) -> None:
+    def __init__(self, winner_idx: int | None, game_mode: str = "PVE") -> None:
         """
         winner_idx: 0 for player 1 wins, 1 for player 2 wins, None for draw.
-        The overlay chooses victory/lose image based on convention:
-          player 1 (idx 0) = victory image
-          player 2 (idx 1) / draw = lose image  (in PVP, both signs shown briefly)
-        For PVE the caller can pass idx 0 = human won, idx None/1 = human lost.
-
-        In practice, GameManager always calls this with winner_idx from tanks list.
+        game_mode: "PVE" or "PVP".
         """
         self._elapsed = 0.0
         self._winner_idx = winner_idx  # None = draw
 
         # Choose which popup to show
-        if winner_idx == 0:
-            self._img_key = "icons/victory"
-        elif winner_idx is None:
-            self._img_key = "icons/lose"   # draw → lose popup (neutral)
+        if game_mode == "PVP":
+            if winner_idx == 0:
+                self._img_key = "icons/p1_win"
+            elif winner_idx == 1:
+                self._img_key = "icons/p2_win"
+            else:
+                self._img_key = "icons/lose" # Draw
         else:
-            self._img_key = "icons/lose"
+            # PVE mode
+            if winner_idx == 0:
+                self._img_key = "icons/victory"
+            else:
+                self._img_key = "icons/lose"
 
         # Load and scale the popup image
         raw = assets.get_image(self._img_key)

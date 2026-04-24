@@ -21,6 +21,8 @@ class MenuButton:
     border: tuple[int, int, int]
     action: str
     subtitle: str = ""
+    is_locked: bool = False
+    thumbnail_key: str | None = None
 
 
 class MainMenu:
@@ -37,6 +39,9 @@ class MainMenu:
         self.selected_mode = "PVP"
         self.selected_difficulty = "Medium"
 
+        from src.core.map_config import get_map_config, MAP_CATALOGUE
+        self.get_map_config = get_map_config
+        
         self._home_buttons = self._build_home_buttons()
         self._mode_buttons = self._build_mode_buttons()
         self._difficulty_buttons = self._build_difficulty_buttons()
@@ -148,6 +153,7 @@ class MainMenu:
         ]
 
     def _build_level_buttons(self) -> list[MenuButton]:
+        from src.utils.settings_store import settings
         cards: list[MenuButton] = []
         card_w = 320
         card_h = 186
@@ -161,11 +167,20 @@ class MainMenu:
             row = idx // 3
             x = start_x + col * (card_w + gap_x)
             y = start_y + row * (card_h + gap_y)
-            label = str(idx + 1)
-            action = f"level_{idx + 1}"
-            if idx == 1:
-                label = "LOCK"
-                action = "locked"
+            
+            level_id = idx + 1
+            config = self.get_map_config(level_id)
+            
+            # Determine if this level is locked
+            is_locked = False
+            # Hard lock maps 4, 5, 6 for now as they are not designed yet
+            if level_id > 3:
+                is_locked = True
+            elif self.selected_mode == "PVE" and level_id > settings.max_unlocked_level:
+                is_locked = True
+                
+            label = config.name
+            action = f"level_{level_id}" if not is_locked else "locked"
 
             cards.append(
                 MenuButton(
@@ -175,7 +190,9 @@ class MainMenu:
                     fill_bottom=(67, 170, 236),
                     border=(49, 116, 181),
                     action=action,
-                    subtitle=t("level_locked") if idx == 1 else t("level_ready"),
+                    subtitle=t("level_locked") if is_locked else t("level_ready"),
+                    is_locked=is_locked,
+                    thumbnail_key=config.thumbnail_image,
                 )
             )
 
@@ -222,26 +239,56 @@ class MainMenu:
         shadow = btn.rect.move(0, 6)
         pygame.draw.rect(screen, (40, 80, 55, 80), shadow, border_radius=28)
 
-        half_h = btn.rect.height // 2
-        top = pygame.Rect(btn.rect.left, btn.rect.top, btn.rect.width, half_h)
-        bottom = pygame.Rect(btn.rect.left, btn.rect.top + half_h, btn.rect.width, btn.rect.height - half_h)
+        # Draw thumbnail if available
+        if btn.thumbnail_key:
+            thumb = assets.get_image(btn.thumbnail_key)
+            if thumb:
+                thumb = pygame.transform.smoothscale(thumb, (btn.rect.width, btn.rect.height))
+                screen.blit(thumb, btn.rect)
+                # Overlay for better text readability
+                overlay = pygame.Surface((btn.rect.width, btn.rect.height), pygame.SRCALPHA)
+                overlay.fill((0, 0, 0, 80))
+                screen.blit(overlay, btn.rect)
+        else:
+            half_h = btn.rect.height // 2
+            top = pygame.Rect(btn.rect.left, btn.rect.top, btn.rect.width, half_h)
+            bottom = pygame.Rect(btn.rect.left, btn.rect.top + half_h, btn.rect.width, btn.rect.height - half_h)
+            pygame.draw.rect(screen, btn.fill_top, top, border_top_left_radius=28, border_top_right_radius=28)
+            pygame.draw.rect(screen, btn.fill_bottom, bottom, border_bottom_left_radius=28, border_bottom_right_radius=28)
 
-        pygame.draw.rect(screen, btn.fill_top, top, border_top_left_radius=28, border_top_right_radius=28)
-        pygame.draw.rect(screen, btn.fill_bottom, bottom, border_bottom_left_radius=28, border_bottom_right_radius=28)
+        # Draw lock icon if locked
+        if btn.is_locked:
+            lock_icon = assets.get_image("icons/lock_map")
+            if lock_icon:
+                # Dim the button
+                dim = pygame.Surface((btn.rect.width, btn.rect.height), pygame.SRCALPHA)
+                dim.fill((0, 0, 0, 150))
+                screen.blit(dim, btn.rect)
+                # Draw lock
+                lock_scaled = pygame.transform.smoothscale(lock_icon, (64, 64))
+                screen.blit(lock_scaled, lock_scaled.get_rect(center=btn.rect.center))
+            else:
+                # Fallback lock text
+                lock_label = self.btn_font.render("LOCKED", True, (255, 100, 100))
+                screen.blit(lock_label, lock_label.get_rect(center=btn.rect.center))
 
         border_color = (255, 255, 255) if active else btn.border
         border_width = 5 if active else 4
         pygame.draw.rect(screen, border_color, btn.rect, width=border_width, border_radius=28)
 
-        gloss = pygame.Rect(btn.rect.left + 16, btn.rect.top + 10, btn.rect.width - 150, 20)
-        pygame.draw.ellipse(screen, (255, 255, 255, 120), gloss)
+        if not btn.is_locked:
+            gloss = pygame.Rect(btn.rect.left + 16, btn.rect.top + 10, btn.rect.width - 150, 20)
+            pygame.draw.ellipse(screen, (255, 255, 255, 120), gloss)
 
-        label = self.btn_font.render(btn.label, True, (41, 50, 61))
+        label_color = (255, 255, 255) if btn.thumbnail_key else (41, 50, 61)
+        if btn.is_locked: label_color = (150, 150, 150)
+        
+        label = self.btn_font.render(btn.label, True, label_color)
         label_rect = label.get_rect(center=(btn.rect.centerx, btn.rect.centery - 6))
         screen.blit(label, label_rect)
 
         if btn.subtitle:
-            sub = self.small_font.render(btn.subtitle, True, (38, 56, 76))
+            sub = self.small_font.render(btn.subtitle, True, label_color)
             sub_rect = sub.get_rect(center=(btn.rect.centerx, btn.rect.centery + 28))
             screen.blit(sub, sub_rect)
 
@@ -252,7 +299,11 @@ class MainMenu:
             elif self.state == "difficulty":
                 self.state = "mode"
             elif self.state == "levels":
-                self.state = "difficulty"
+                # If we bypassed difficulty (PVP), go back to mode
+                if self.selected_mode == "PVP":
+                    self.state = "mode"
+                else:
+                    self.state = "difficulty"
             return None
 
         if self.state == "home":
@@ -270,7 +321,11 @@ class MainMenu:
             for btn in self._mode_buttons:
                 if btn.rect.collidepoint(pos):
                     self.selected_mode = "PVP" if btn.action == "mode_pvp" else "PVE"
-                    self.state = "difficulty"
+                    if self.selected_mode == "PVP":
+                        self.state = "levels"
+                        self._level_buttons = self._build_level_buttons()
+                    else:
+                        self.state = "difficulty"
                     return None
 
         if self.state == "difficulty":
@@ -290,7 +345,9 @@ class MainMenu:
                 if btn.rect.collidepoint(pos):
                     if btn.action == "locked":
                         return None
-                    return "start"
+                    # action is "level_X"
+                    level_id = int(btn.action.split("_")[1])
+                    return ("start", level_id)
 
         return None
 

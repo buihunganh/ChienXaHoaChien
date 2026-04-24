@@ -12,11 +12,14 @@ from src.ui.game_over_overlay import GameOverOverlay
 from src.ui.hud import HUD
 from src.ui.main_menu import MainMenu
 from src.ui.pause_menu import PauseMenu
+from src.core.map_config import get_map_config
+from src.utils.settings_store import settings
 from src.utils.asset_manager import assets
 from src.utils.audio_manager import audio
 from src.utils.constants import (
     EXPLOSION_DAMAGE_RADIUS,
     FONT_SIZE_TITLE,
+    FUEL_COST_PER_PIXEL,
     GRAVITY,
     GREEN,
     HEIGHT,
@@ -34,12 +37,18 @@ from src.utils.constants import (
 class GameManager:
     """High-level game state coordinator."""
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(self, screen: pygame.Surface, level_id: int = 1) -> None:
         self.screen = screen
         self.state = "menu"
+        
+        # Load map config and apply physics settings early so Terrain can use it
+        self.level_id = level_id
+        config = get_map_config(level_id)
+        self.map_config = config
+        
         self.menu = MainMenu()
         self.hud = HUD()
-        self.terrain = Terrain()
+        self.terrain = Terrain(config)
         self.pause_menu = PauseMenu()
         self.paused = False
         self._game_over_overlay: GameOverOverlay | None = None
@@ -48,7 +57,14 @@ class GameManager:
         self.game_mode = "PVP"
         self.difficulty = "Medium"
 
-        self.wind = random.uniform(WIND_MIN, WIND_MAX)
+        self._effective_gravity = config.gravity
+        self._effective_wind_min = config.wind_mag_min
+        self._effective_wind_max = config.wind_mag_max
+        self._effective_fuel_cost = config.fuel_cost
+
+        # Determine wind magnitude and randomize direction
+        mag = random.uniform(self._effective_wind_min, self._effective_wind_max)
+        self.wind = mag if random.choice([True, False]) else -mag
         self.turn_index = 0
         self.winner_text = ""
         self.winner_color = (20, 20, 20)
@@ -92,7 +108,8 @@ class GameManager:
 
     def _next_turn(self) -> None:
         self.turn_index = (self.turn_index + 1) % len(self.tanks)
-        self.wind = random.uniform(WIND_MIN, WIND_MAX)
+        mag = random.uniform(self._effective_wind_min, self._effective_wind_max)
+        self.wind = mag if random.choice([True, False]) else -mag
         self.current_bullet_type = random.choice(BULLET_TYPES)
         self._reset_turn_inputs()
         self.bot_pending_shot = False
@@ -102,13 +119,19 @@ class GameManager:
     def handle_event(self, event: pygame.event.Event) -> None:
         if self.state == "menu":
             action = self.menu.handle_event(event)
-            if action == "start":
-                self.game_mode = self.menu.selected_mode
-                self.difficulty = self.menu.selected_difficulty
+            if isinstance(action, tuple) and action[0] == "start":
+                level_id = action[1]
+                # Preserve menu selection before __init__ resets self.menu
+                mode = self.menu.selected_mode
+                diff = self.menu.selected_difficulty
+                
+                # Re-init with selected level
+                self.__init__(self.screen, level_id)
+                self.game_mode = mode
+                self.difficulty = diff
                 self.state = "playing"
                 audio.play_music("battle")
             elif action is None and event.type == pygame.MOUSEBUTTONDOWN:
-                # Button was clicked in menu (any click while in menu)
                 audio.play_sfx("click")
             return
 
@@ -119,16 +142,18 @@ class GameManager:
                 self.paused = False
             elif result == "main_menu":
                 self.paused = False
-                self.__init__(self.screen)
+                self.__init__(self.screen, 1) # Back to level 1 for safety, menu state will be reset anyway
+                self.state = "menu"
             return
 
         if self.state == "game_over" and event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-            # Preserve the mode/difficulty the player chose — __init__ resets them to defaults
-            saved_mode       = self.game_mode
+            # Preserve level, mode, difficulty
+            saved_level = self.level_id
+            saved_mode = self.game_mode
             saved_difficulty = self.difficulty
-            self.__init__(self.screen)
-            self.game_mode   = saved_mode
-            self.difficulty  = saved_difficulty
+            self.__init__(self.screen, saved_level)
+            self.game_mode = saved_mode
+            self.difficulty = saved_difficulty
             self.state = "playing"
             audio.play_music("battle")
             return
@@ -277,7 +302,7 @@ class GameManager:
         dt = 1.0 / 60.0
         for _ in range(360):
             vx += self.wind * dt
-            vy += GRAVITY * dt
+            vy += self._effective_gravity * dt
             x += vx * dt
             y += vy * dt
 
@@ -468,7 +493,7 @@ class GameManager:
         current = self.tanks[self.turn_index]
 
         for tank in self.tanks:
-            tank.apply_gravity(dt, self.terrain)
+            tank.apply_gravity(dt, self.terrain, self._effective_gravity)
 
         self._update_tank_motion_estimates(dt)
 
@@ -483,10 +508,10 @@ class GameManager:
         if self.active_bullet is None and current.is_alive and not self.is_charging and not self._is_bot_turn():
             keys = pygame.key.get_pressed()
             if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                current.move_horizontal(-1.0, dt, self.terrain)
+                current.move_horizontal(-1.0, dt, self.terrain, self._effective_fuel_cost)
                 _player_moving = True
             if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-                current.move_horizontal(1.0, dt, self.terrain)
+                current.move_horizontal(1.0, dt, self.terrain, self._effective_fuel_cost)
                 _player_moving = True
 
             # Gunny-like cannon control: Up/Down (or W/S) changes barrel angle.
@@ -534,7 +559,7 @@ class GameManager:
             self._check_game_over()
             return
 
-        self.active_bullet.update(dt, self.wind)
+        self.active_bullet.update(dt, self.wind, self._effective_gravity)
 
         if self.active_bullet.y > HEIGHT or self.active_bullet.x < 0 or self.active_bullet.x > WIDTH:
             self.active_bullet = None
@@ -603,18 +628,23 @@ class GameManager:
                 self.state = "game_over"
                 self.winner_text = f"Player {winner_idx + 1} wins"
                 self.winner_color = self.tanks[alive[0]].color
-                self._game_over_overlay = GameOverOverlay(winner_idx)
-                # Play victory music for the human player's perspective
-                if self.game_mode == "PVE" and alive[0] == 1:
-                    audio.play_music("lose", fade_ms=800)
-                else:
+                self._game_over_overlay = GameOverOverlay(winner_idx, self.game_mode)
+                # Play victory music for PVP wins or Human PVE wins
+                if self.game_mode == "PVP":
                     audio.play_music("victory", fade_ms=800)
+                elif self.game_mode == "PVE" and alive[0] == 1: # Bot won
+                    audio.play_music("lose", fade_ms=800)
+                else: # Human won PVE
+                    audio.play_music("victory", fade_ms=800)
+                    # Unlock next level if this was the highest level in PVE
+                    if self.game_mode == "PVE" and self.level_id == settings.max_unlocked_level:
+                        settings.max_unlocked_level = min(6, self.level_id + 1)
         elif len(alive) == 0:
             if self.state != "game_over":
                 self.state = "game_over"
                 self.winner_text = "Draw"
                 self.winner_color = (40, 40, 40)
-                self._game_over_overlay = GameOverOverlay(None)
+                self._game_over_overlay = GameOverOverlay(None, self.game_mode)
                 audio.play_music("lose", fade_ms=800)
 
     def _draw_world_decorations(self) -> None:
@@ -644,11 +674,14 @@ class GameManager:
             pygame.draw.circle(self.screen, (97, 176, 72), (tx + 14, ty - 26), 16)
 
     def render(self) -> None:
-        bg = assets.get_image("bg/battlefield")
+        bg_key = self.map_config.bg_image if self.state != "menu" else "bg/main_menu"
+        bg = assets.get_image(bg_key)
         if bg is not None:
+            if bg.get_size() != (WIDTH, HEIGHT):
+                bg = pygame.transform.smoothscale(bg, (WIDTH, HEIGHT))
             self.screen.blit(bg, (0, 0))
         else:
-            self.screen.fill(SKY_BLUE)
+            self.screen.fill(SKY_BLUE if self.state != "menu" else (100, 200, 255))
 
         if self.state == "menu":
             self.menu.draw(self.screen)

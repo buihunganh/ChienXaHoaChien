@@ -19,8 +19,11 @@ from src.utils.constants import FONTS_DIR, HEIGHT, IMAGES_DIR, WIDTH
 # ---------------------------------------------------------------------------
 _IMAGE_REGISTRY: dict[str, str] = {
     # Backgrounds
+    "bg/plain":         "background/plain_map.png",
+    "bg/sea":           "background/sea_map.jpg",
+    "bg/space":         "background/outerspace_map.jpg",
+    "bg/main_menu":     "background/Main_menu_background.png",
     "bg/battlefield":   "bg/battlefield.png",
-    "bg/main_menu":     "bg/main_menu.png",
     # Tank sprites
     "tanks/tank_green_body":    "tanks/tank_green_body.png",
     "tanks/tank_green_turret":  "tanks/tank_green_turret.png",
@@ -36,13 +39,18 @@ _IMAGE_REGISTRY: dict[str, str] = {
     "ui/shield_vs":     "ui/shield_vs.png",
     "ui/power_bar_bg":  "ui/power_bar_bg.png",
     # Icons
-    "icons/volume":   "icons/volume_icon.png",
-    "icons/victory":  "icons/Victory_popup_sign.png",
-    "icons/lose":     "icons/Lose_popup_sign.png",
+    "icons/volume":    "icons/volume_icon.png",
+    "icons/victory":   "icons/Victory_popup_sign.png",
+    "icons/lose":      "icons/Lose_popup_sign.png",
+    "icons/lock_map":  "icons/lock_map.png",
+    "icons/p1_win":    "icons/player1_win_popup_sign.png",
+    "icons/p2_win":    "icons/player2_win_popup_sign.png",
+    "icons/grass1":    "icons/grass1.png",
+    "icons/grass2":    "icons/grass2.png",
 }
 
 # Images that are loaded WITHOUT alpha and scaled to screen (solid full-screen backgrounds)
-_SOLID_BG_KEYS: frozenset[str] = frozenset({"bg/battlefield", "bg/main_menu"})
+_SOLID_BG_KEYS: frozenset[str] = frozenset({"bg/plain", "bg/sea", "bg/space", "bg/main_menu", "bg/battlefield"})
 
 # Font size variants to pre-load
 _FONT_SIZES: tuple[int, ...] = (22, 28, 36, 52, 64)
@@ -110,15 +118,33 @@ class AssetManager:
                 continue
             try:
                 raw = pygame.image.load(str(full_path))
+                
+                # --- Auto-crop white borders for solid backgrounds ---
                 if key in _SOLID_BG_KEYS:
+                    # Scan for non-white rows to remove letterboxing bars (e.g., in outerspace_map.jpg)
+                    w, h = raw.get_size()
+                    top, bottom = 0, h - 1
+                    threshold = 250 # White threshold
+                    
+                    for y in range(h // 4):
+                        if any(raw.get_at((x, y)).r < threshold for x in [0, w//4, w//2, 3*w//4, w-1]):
+                            top = y; break
+                    for y in range(h - 1, h - h // 4, -1):
+                        if any(raw.get_at((x, y)).r < threshold for x in [0, w//4, w//2, 3*w//4, w-1]):
+                            bottom = y; break
+                    
+                    if bottom > top:
+                        raw = raw.subsurface((0, top, w, bottom - top + 1))
+                    
                     surface = raw.convert()
-                    # Scale to screen size once at load time — free at render time
                     if surface.get_size() != (WIDTH, HEIGHT):
-                        surface = pygame.transform.scale(surface, (WIDTH, HEIGHT))
+                        surface = pygame.transform.smoothscale(surface, (WIDTH, HEIGHT))
+                    print(f"[AssetManager] Loaded BG: {rel_path} {raw.get_size()} (cropped {top}px top, {h-1-bottom}px bottom)")
                 else:
                     surface = raw.convert_alpha()
+                    print(f"[AssetManager] Loaded Sprite: {rel_path} {raw.get_size()}")
+                
                 self._images[key] = surface
-                print(f"[AssetManager] Loaded: {rel_path} {raw.get_size()}")
             except Exception as exc:
                 print(f"[AssetManager] ERROR loading {rel_path}: {exc}")
                 self._images[key] = None
