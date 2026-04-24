@@ -126,9 +126,11 @@ class GameManager:
         self.bot_reposition_done = False
         audio.stop_movement()  # ensure movement loop stops on turn change
 
-    def handle_event(self, event: pygame.event.Event) -> None:
+    def handle_event(self, event: pygame.event.Event) -> str | None:
         if self.state == "menu":
             action = self.menu.handle_event(event)
+            if action == "quit":
+                return "quit"
             if isinstance(action, tuple) and action[0] == "start":
                 level_id = action[1]
                 # Preserve menu selection before __init__ resets self.menu
@@ -143,7 +145,7 @@ class GameManager:
                 audio.play_music("battle")
             elif action is None and event.type == pygame.MOUSEBUTTONDOWN:
                 audio.play_sfx("click")
-            return
+            return None
 
         # --- Pause overlay intercepts all events while paused ---
         if self.paused:

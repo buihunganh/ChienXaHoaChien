@@ -17,7 +17,7 @@ def main() -> None:
     settings.load()
 
     # Apply display mode from saved settings
-    flags = pygame.FULLSCREEN if settings.fullscreen else 0
+    flags = pygame.FULLSCREEN | pygame.SCALED if settings.fullscreen else 0
     screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
     pygame.display.set_caption(SCREEN_TITLE)
     clock = pygame.time.Clock()
@@ -45,7 +45,9 @@ def main() -> None:
             if event.type == pygame.QUIT:
                 running = False
             else:
-                manager.handle_event(event)
+                result = manager.handle_event(event)
+                if result == "quit":
+                    running = False
 
         manager.update(dt)
         manager.render()

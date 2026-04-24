@@ -51,6 +51,9 @@ class MainMenu:
         from src.ui.settings_screen import SettingsScreen
         self._settings_screen = SettingsScreen()
 
+        # Pre-render stylized text logo
+        self._logo_surf = self._build_logo_surface()
+
         self.back_button = MenuButton(
             label=t("back"),
             rect=pygame.Rect(26, 24, 160, 56),
@@ -60,12 +63,72 @@ class MainMenu:
             action="back",
         )
 
+    def _build_logo_surface(self) -> pygame.Surface:
+        """Create a premium styled 'Tank Battle' text logo surface."""
+        logo_font = assets.get_font(150)
+        sub_font = assets.get_font(32)
+        text = "Tank Battle"
+        sub_text = "— Ultimate Combat —"
+
+        # Measure sizes
+        main_w, main_h = logo_font.size(text)
+        sub_w, sub_h = sub_font.size(sub_text)
+        pad = 20
+        surf_w = max(main_w, sub_w) + pad * 2 + 12
+        surf_h = main_h + sub_h + 18 + pad * 2
+        surf = pygame.Surface((surf_w, surf_h), pygame.SRCALPHA)
+
+        cx = surf_w // 2
+
+        # Layer 1: Dark shadow (offset)
+        shadow = logo_font.render(text, True, (20, 10, 5))
+        surf.blit(shadow, (cx - shadow.get_width() // 2 + 4, pad + 5))
+
+        # Layer 2: Dark outline (render at offsets)
+        outline_color = (50, 28, 12)
+        outline = logo_font.render(text, True, outline_color)
+        for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3), (-2, -2), (2, -2), (-2, 2), (2, 2)]:
+            surf.blit(outline, (cx - outline.get_width() // 2 + dx, pad + dy))
+
+        # Layer 3: Orange-gold border
+        border = logo_font.render(text, True, (220, 120, 30))
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            surf.blit(border, (cx - border.get_width() // 2 + dx, pad + dy))
+
+        # Layer 4: Main gradient text (gold top to orange bottom)
+        main_text = logo_font.render(text, True, (255, 220, 80))
+        surf.blit(main_text, (cx - main_text.get_width() // 2, pad))
+
+        # Layer 5: Glossy highlight (top half only)
+        highlight = logo_font.render(text, True, (255, 248, 180))
+        clip_h = main_h // 2
+        clip_surf = pygame.Surface((main_w, clip_h), pygame.SRCALPHA)
+        clip_surf.blit(highlight, (0, 0))
+        # Fade out the bottom of the highlight
+        for y in range(clip_h):
+            alpha = max(0, 255 - int(y * 255 / clip_h * 1.2))
+            for x in range(main_w):
+                r, g, b, a = clip_surf.get_at((x, y))
+                if a > 0:
+                    clip_surf.set_at((x, y), (r, g, b, min(a, alpha)))
+        surf.blit(clip_surf, (cx - main_w // 2, pad))
+
+        # Subtitle
+        sub_shadow = sub_font.render(sub_text, True, (30, 15, 5))
+        surf.blit(sub_shadow, (cx - sub_shadow.get_width() // 2 + 2, pad + main_h + 5))
+        sub_render = sub_font.render(sub_text, True, (210, 190, 140))
+        surf.blit(sub_render, (cx - sub_render.get_width() // 2, pad + main_h + 3))
+
+        return surf
+
     def _build_home_buttons(self) -> list[MenuButton]:
         center_x = WIDTH // 2
         width = 460
-        height = 108
-        gap = 30
-        start_y = 168
+        height = 72
+        gap = 14
+        # Total buttons block: 4*72 + 3*14 = 330px
+        # Center the block in lower portion of screen (below logo)
+        start_y = 280
 
         return [
             MenuButton(
@@ -91,6 +154,14 @@ class MainMenu:
                 fill_bottom=(244, 180, 55),
                 border=(173, 122, 35),
                 action="go_guide",
+            ),
+            MenuButton(
+                label=t("menu_quit"),
+                rect=pygame.Rect(center_x - width // 2, start_y + 3 * (height + gap), width, height),
+                fill_top=(235, 87, 87),
+                fill_bottom=(180, 48, 48),
+                border=(130, 30, 30),
+                action="quit_game",
             ),
         ]
 
@@ -323,6 +394,8 @@ class MainMenu:
                         self.state = "settings"
                     elif btn.action == "go_guide":
                         self.state = "guide"
+                    elif btn.action == "quit_game":
+                        return "quit"
                     return None
 
         if self.state == "mode":
@@ -413,6 +486,10 @@ class MainMenu:
             return
 
         if self.state == "home":
+            # Draw pre-rendered logo
+            if self._logo_surf is not None:
+                lx = WIDTH // 2 - self._logo_surf.get_width() // 2
+                screen.blit(self._logo_surf, (lx, 10))
             for btn in self._home_buttons:
                 self._draw_button(screen, btn)
             return

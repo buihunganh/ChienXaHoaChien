@@ -41,7 +41,7 @@ TANK_MOVE_SPEED = 150.0
 TANK_STEP_UP = 16
 TANK_MAX_DROP = 24
 TANK_MAX_HP = 100
-MAX_FUEL = 50.0
+MAX_FUEL = 100.0
 FUEL_COST_PER_PIXEL = 0.055
 
 # Tank dimensions (used for sprite and terrain fitting)

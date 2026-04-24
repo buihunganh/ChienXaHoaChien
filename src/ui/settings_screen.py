@@ -182,6 +182,8 @@ class SettingsScreen:
                 self._apply_fullscreen(settings.fullscreen)
             # Save & Close / Save & Resume
             if self._save_rect.collidepoint(event.pos):
+                # Apply fullscreen setting immediately
+                self._apply_fullscreen(settings.fullscreen)
                 settings.save()
                 return "resume" if self.in_game else "close"
 
@@ -273,9 +275,8 @@ class SettingsScreen:
     def _apply_fullscreen(enabled: bool) -> None:
         try:
             if enabled:
-                pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
+                pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.SCALED)
             else:
-                from src.utils.constants import WIDTH, HEIGHT
                 pygame.display.set_mode((WIDTH, HEIGHT))
         except Exception as exc:
             print(f"[SettingsScreen] Fullscreen toggle failed: {exc}")

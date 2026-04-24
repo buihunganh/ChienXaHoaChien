@@ -17,6 +17,7 @@ _STRINGS: dict[str, str] = {
     "menu_guide":       "How to Play",
     "menu_title":       "Tank Battle",
     "menu_quit_to_main":"Main Menu",
+    "menu_quit":        "Quit Game",
 
     # ----- Mode selection -----
     "mode_title":       "Game Mode",

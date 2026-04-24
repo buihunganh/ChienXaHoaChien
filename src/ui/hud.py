@@ -21,6 +21,7 @@ from src.utils.constants import (
     SHOT_POWER_MIN,
     WHITE,
     WIDTH,
+    WIND_MAX,
 )
 
 
@@ -133,7 +134,8 @@ class HUD:
         screen.blit(self._lbl_wind, (WIDTH // 2 - self._lbl_wind.get_width() // 2, 142))
 
         # Dynamic: arrow + value (changes every turn)
-        ratio = max(-1.0, min(1.0, wind / 85.0))
+        wind_max = WIND_MAX if WIND_MAX > 0 else 1.0
+        ratio = max(-1.0, min(1.0, wind / wind_max))
         arrow_len = int(95 * abs(ratio))
         direction = 1 if wind >= 0 else -1
 
