@@ -28,6 +28,9 @@ from src.utils.constants import (
     SHOT_POWER_MAX,
     SHOT_POWER_MIN,
     SKY_BLUE,
+    TANK_MAX_DROP,
+    TANK_MOVE_SPEED,
+    TANK_STEP_UP,
     WIND_MAX,
     WIND_MIN,
     WIDTH,
@@ -94,8 +97,12 @@ class GameManager:
 
         self.bot_pending_shot = False
         self.bot_shot_delay = 0.0
+        self.bot_move_direction = 0.0
+        self.bot_move_time_left = 0.0
+        self.bot_reposition_done = False
         self.tank_prev_x = [tank.x for tank in self.tanks]
         self.tank_est_vel_x = [0.0 for _ in self.tanks]
+        self.explosion_effects: list[dict[str, object]] = []
 
     def _reset_turn_inputs(self) -> None:
         self.is_dragging = False
@@ -114,6 +121,9 @@ class GameManager:
         self._reset_turn_inputs()
         self.bot_pending_shot = False
         self.bot_shot_delay = 0.0
+        self.bot_move_direction = 0.0
+        self.bot_move_time_left = 0.0
+        self.bot_reposition_done = False
         audio.stop_movement()  # ensure movement loop stops on turn change
 
     def handle_event(self, event: pygame.event.Event) -> None:
@@ -250,6 +260,28 @@ class GameManager:
             dir_y = vec_y / length
 
         muzzle_x, muzzle_y = tank.get_barrel_tip()
+
+        # If muzzle is too close to terrain/obstacle, shot backfires onto shooter.
+        blocked = False
+        for probe in (0.0, 8.0, 15.0):
+            px = muzzle_x + dir_x * probe
+            py = muzzle_y + dir_y * probe
+            if self.terrain.is_solid_at(px, py):
+                blocked = True
+                break
+
+        if blocked:
+            backfire_damage = int(max(8, self.current_bullet_type.damage * 0.62))
+            tank.take_damage(backfire_damage)
+            backfire_radius = max(12, int(self.current_bullet_type.explosion_radius * 0.45))
+            self.terrain.carve_crater(muzzle_x, muzzle_y, backfire_radius)
+            self._spawn_explosion_effect(muzzle_x, muzzle_y, backfire_radius, direct_hit=False)
+            audio.play_sfx("hit_ground")
+            self.aim_ready = False
+            self._next_turn()
+            self._check_game_over()
+            return
+
         self.active_bullet = Bullet(
             x=muzzle_x,
             y=muzzle_y,
@@ -464,6 +496,128 @@ class GameManager:
         self.bot_pending_shot = True
         self.bot_shot_delay = random.uniform(delay_min, delay_max)
 
+    def _is_path_navigable(self, from_x: float, to_x: float) -> bool:
+        """Reject moves that cross cliffs too steep for the tank step/drop limits."""
+        if abs(to_x - from_x) < 1.0:
+            return True
+
+        direction = 1.0 if to_x > from_x else -1.0
+        probe_step = 22.0
+        x = from_x
+        prev_ground = self.terrain.get_surface_y(x)
+        if prev_ground is None:
+            return False
+
+        while (direction > 0 and x < to_x) or (direction < 0 and x > to_x):
+            x += direction * probe_step
+            if (direction > 0 and x > to_x) or (direction < 0 and x < to_x):
+                x = to_x
+
+            ground = self.terrain.get_surface_y(x)
+            if ground is None:
+                return False
+
+            climb = ground - prev_ground
+            if climb > TANK_STEP_UP + 4:
+                return False
+            if climb < -(TANK_MAX_DROP + 6):
+                return False
+
+            prev_ground = ground
+
+        return True
+
+    def _estimate_error_for_x(self, shooter: Tank, target: Tank, target_idx: int, candidate_x: float) -> float:
+        """Estimate shot quality from a hypothetical x-position (lower is better)."""
+        original_x = shooter.x
+        original_y = shooter.y
+        original_vy = shooter.vy
+        original_slope = shooter.slope_angle_deg
+
+        shooter.x = candidate_x
+        shooter.snap_to_ground(self.terrain)
+
+        predicted_target_x = self._predict_target_x(shooter, target, target_idx, SHOT_POWER_MAX)
+        distance = abs(predicted_target_x - shooter.x)
+        dist_ratio = max(0.0, min(1.0, distance / (WIDTH * 0.72)))
+
+        power_span = SHOT_POWER_MAX - SHOT_POWER_MIN
+        power = SHOT_POWER_MIN + power_span * (0.25 + 0.65 * dist_ratio)
+        angle_left = 152.0 - 40.0 * dist_ratio
+        angle = self._orient_angle_toward(angle_left, shooter.x, predicted_target_x)
+        target_y = target.y - 18.0
+        shot_error, _, _ = self._eval_shot_error(shooter, predicted_target_x, target_y, angle, power)
+
+        shooter.x = original_x
+        shooter.y = original_y
+        shooter.vy = original_vy
+        shooter.slope_angle_deg = original_slope
+        return shot_error
+
+    def _choose_bot_reposition(self, shooter: Tank, target: Tank, target_idx: int) -> None:
+        """Choose a short strategic move before shooting.
+
+        Bot evaluates nearby positions by estimated hit error + tactical spacing,
+        then moves only when there is a meaningful improvement.
+        """
+        if shooter.fuel <= 1.0:
+            self.bot_reposition_done = True
+            return
+
+        if self.difficulty == "Easy":
+            offsets = (-80.0, -48.0, 0.0, 48.0, 80.0)
+            max_travel = 95.0
+            ideal_distance = 440.0
+            move_penalty = 0.48
+            improve_threshold = 44.0
+        elif self.difficulty == "Hard":
+            offsets = (-210.0, -140.0, -90.0, -48.0, 0.0, 48.0, 90.0, 140.0, 210.0)
+            max_travel = 220.0
+            ideal_distance = 600.0
+            move_penalty = 0.26
+            improve_threshold = 18.0
+        else:
+            offsets = (-150.0, -96.0, -56.0, 0.0, 56.0, 96.0, 150.0)
+            max_travel = 165.0
+            ideal_distance = 540.0
+            move_penalty = 0.34
+            improve_threshold = 28.0
+
+        current_x = shooter.x
+        baseline_error = self._estimate_error_for_x(shooter, target, target_idx, current_x)
+        baseline_score = baseline_error + abs(abs(target.x - current_x) - ideal_distance) * 0.28
+
+        best_x = current_x
+        best_score = baseline_score
+
+        for offset in offsets:
+            candidate_x = max(12.0, min(WIDTH - 12.0, current_x + offset))
+            travel = abs(candidate_x - current_x)
+            if travel > max_travel + 1e-5:
+                continue
+            if not self._is_path_navigable(current_x, candidate_x):
+                continue
+
+            error = self._estimate_error_for_x(shooter, target, target_idx, candidate_x)
+            tactical_spacing = abs(abs(target.x - candidate_x) - ideal_distance) * 0.28
+            danger_penalty = 0.0
+            if abs(target.x - candidate_x) < 190.0:
+                danger_penalty += (190.0 - abs(target.x - candidate_x)) * 0.35
+
+            score = error + tactical_spacing + travel * move_penalty + danger_penalty
+            if score < best_score:
+                best_score = score
+                best_x = candidate_x
+
+        gain = baseline_score - best_score
+        if gain <= improve_threshold or abs(best_x - current_x) < 8.0:
+            self.bot_reposition_done = True
+            return
+
+        self.bot_move_direction = 1.0 if best_x > current_x else -1.0
+        self.bot_move_time_left = abs(best_x - current_x) / max(1.0, TANK_MOVE_SPEED)
+        self.bot_reposition_done = True
+
     def _update_bot_turn(self, dt: float, shooter: Tank) -> None:
         if not shooter.is_alive or self.active_bullet is not None:
             return
@@ -472,6 +626,26 @@ class GameManager:
         target = self.tanks[target_idx]
         if not target.is_alive:
             return
+
+        if self.bot_move_time_left > 0.0 and abs(self.bot_move_direction) > 0.0:
+            prev_x = shooter.x
+            shooter.move_horizontal(self.bot_move_direction, dt, self.terrain, self._effective_fuel_cost)
+            moved = abs(shooter.x - prev_x) > 0.04
+            if moved:
+                self.bot_move_time_left = max(0.0, self.bot_move_time_left - dt)
+            else:
+                self.bot_move_time_left = 0.0
+
+            if self.bot_move_time_left <= 0.0:
+                self.bot_move_direction = 0.0
+
+            # Reposition phase consumes this frame; shoot on subsequent frame.
+            return
+
+        if not self.bot_reposition_done:
+            self._choose_bot_reposition(shooter, target, target_idx)
+            if self.bot_move_time_left > 0.0:
+                return
 
         if not self.bot_pending_shot:
             self._plan_bot_shot(shooter, target, target_idx)
@@ -486,6 +660,8 @@ class GameManager:
         # Always tick the game-over overlay even when gameplay is frozen
         if self.state == "game_over" and self._game_over_overlay is not None:
             self._game_over_overlay.update(dt)
+
+        self._update_explosion_effects(dt)
 
         if self.state != "playing" or self.paused:
             return
@@ -588,6 +764,7 @@ class GameManager:
 
     def _explode(self, bullet: Bullet, direct_hit_tank: Tank | None = None) -> None:
         self.terrain.carve_crater(bullet.x, bullet.y, bullet.explosion_radius)
+        self._spawn_explosion_effect(bullet.x, bullet.y, bullet.explosion_radius, direct_hit=direct_hit_tank is not None)
         self._apply_explosion_damage(bullet.x, bullet.y, bullet, direct_hit_tank)
         # Play the correct explosion sound based on what was hit
         if direct_hit_tank is not None:
@@ -647,6 +824,105 @@ class GameManager:
                 self._game_over_overlay = GameOverOverlay(None, self.game_mode)
                 audio.play_music("lose", fade_ms=800)
 
+    def _spawn_explosion_effect(self, x: float, y: float, radius: int, direct_hit: bool) -> None:
+        """Create a short-lived VFX packet for one explosion event."""
+        particle_count = max(12, min(36, radius // 2))
+        particles: list[dict[str, float | tuple[int, int, int]]] = []
+        for _ in range(particle_count):
+            angle = random.uniform(0.0, math.tau)
+            speed = random.uniform(90.0, 280.0) * (0.9 + radius / 110.0)
+            ttl = random.uniform(0.18, 0.48)
+            if direct_hit:
+                color = random.choice(((255, 245, 170), (255, 182, 74), (255, 108, 66), (225, 70, 62)))
+            else:
+                color = random.choice(((255, 236, 140), (255, 166, 76), (212, 110, 66), (126, 90, 78)))
+
+            particles.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "vx": math.cos(angle) * speed,
+                    "vy": math.sin(angle) * speed,
+                    "age": 0.0,
+                    "ttl": ttl,
+                    "size": random.uniform(2.0, 5.8),
+                    "color": color,
+                }
+            )
+
+        self.explosion_effects.append(
+            {
+                "x": x,
+                "y": y,
+                "age": 0.0,
+                "duration": 0.40,
+                "radius": float(radius),
+                "particles": particles,
+                "direct_hit": direct_hit,
+            }
+        )
+
+    def _update_explosion_effects(self, dt: float) -> None:
+        if not self.explosion_effects:
+            return
+
+        alive_effects: list[dict[str, object]] = []
+        for effect in self.explosion_effects:
+            effect["age"] = float(effect["age"]) + dt
+            duration = float(effect["duration"])
+
+            alive_particles: list[dict[str, float | tuple[int, int, int]]] = []
+            for p in effect["particles"]:  # type: ignore[index]
+                p["age"] = float(p["age"]) + dt
+                if float(p["age"]) >= float(p["ttl"]):
+                    continue
+
+                p["x"] = float(p["x"]) + float(p["vx"]) * dt
+                p["y"] = float(p["y"]) + float(p["vy"]) * dt
+                p["vy"] = float(p["vy"]) + 560.0 * dt
+                alive_particles.append(p)
+
+            effect["particles"] = alive_particles
+
+            if float(effect["age"]) < duration or alive_particles:
+                alive_effects.append(effect)
+
+        self.explosion_effects = alive_effects
+
+    def _draw_explosion_effects(self, screen: pygame.Surface) -> None:
+        if not self.explosion_effects:
+            return
+
+        for effect in self.explosion_effects:
+            x = int(float(effect["x"]))
+            y = int(float(effect["y"]))
+            age = float(effect["age"])
+            duration = float(effect["duration"])
+            radius = float(effect["radius"])
+            direct_hit = bool(effect["direct_hit"])
+            progress = min(1.0, age / max(1e-5, duration))
+
+            # Expanding bright core and shockwave ring.
+            core_radius = int(max(1.0, (0.22 + 0.35 * (1.0 - progress)) * radius))
+            if core_radius > 0:
+                core_color = (255, 246, 188) if direct_hit else (255, 232, 150)
+                pygame.draw.circle(screen, core_color, (x, y), core_radius)
+
+            ring_radius = int((0.35 + 1.05 * progress) * radius)
+            ring_width = max(1, int(4 * (1.0 - progress)))
+            if ring_radius > 1 and ring_width > 0:
+                ring_color = (255, 145, 86) if direct_hit else (224, 138, 92)
+                pygame.draw.circle(screen, ring_color, (x, y), ring_radius, width=ring_width)
+
+            for p in effect["particles"]:  # type: ignore[index]
+                life_ratio = 1.0 - float(p["age"]) / max(1e-5, float(p["ttl"]))
+                r = int(max(1.0, float(p["size"]) * life_ratio))
+                if r <= 0:
+                    continue
+                px = int(float(p["x"]))
+                py = int(float(p["y"]))
+                pygame.draw.circle(screen, p["color"], (px, py), r)
+
     def _draw_world_decorations(self) -> None:
         """Draw lightweight scenery details so gameplay looks closer to the reference UI."""
         # Clouds
@@ -699,6 +975,8 @@ class GameManager:
 
         if self.active_bullet is not None:
             self.active_bullet.draw(self.screen)
+
+        self._draw_explosion_effects(self.screen)
 
         if self.is_dragging and self.drag_start is not None and self.drag_current is not None:
             pygame.draw.line(

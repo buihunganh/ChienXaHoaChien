@@ -239,15 +239,25 @@ class MainMenu:
         shadow = btn.rect.move(0, 6)
         pygame.draw.rect(screen, (40, 80, 55, 80), shadow, border_radius=28)
 
-        # Draw thumbnail if available
+        # Draw thumbnail if available — clipped to rounded corners
         if btn.thumbnail_key:
             thumb = assets.get_image(btn.thumbnail_key)
             if thumb:
                 thumb = pygame.transform.smoothscale(thumb, (btn.rect.width, btn.rect.height))
-                screen.blit(thumb, btn.rect)
-                # Overlay for better text readability
+                # Build a rounded-corner clipped surface (works even if thumb has no alpha)
+                card = pygame.Surface((btn.rect.width, btn.rect.height), pygame.SRCALPHA)
+                # Draw rounded white mask, then blit thumbnail through it
+                mask = pygame.Surface((btn.rect.width, btn.rect.height), pygame.SRCALPHA)
+                pygame.draw.rect(mask, (255, 255, 255, 255),
+                                 (0, 0, btn.rect.width, btn.rect.height), border_radius=28)
+                card.blit(thumb, (0, 0))
+                # Remove pixels outside rounded rect by zeroing alpha
+                card.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+                screen.blit(card, btn.rect)
+                # Overlay for better text readability (also rounded)
                 overlay = pygame.Surface((btn.rect.width, btn.rect.height), pygame.SRCALPHA)
-                overlay.fill((0, 0, 0, 80))
+                pygame.draw.rect(overlay, (0, 0, 0, 80),
+                                 (0, 0, btn.rect.width, btn.rect.height), border_radius=28)
                 screen.blit(overlay, btn.rect)
         else:
             half_h = btn.rect.height // 2
@@ -256,28 +266,19 @@ class MainMenu:
             pygame.draw.rect(screen, btn.fill_top, top, border_top_left_radius=28, border_top_right_radius=28)
             pygame.draw.rect(screen, btn.fill_bottom, bottom, border_bottom_left_radius=28, border_bottom_right_radius=28)
 
-        # Draw lock icon if locked
+        # Dim locked buttons (before text so text is also dimmed)
         if btn.is_locked:
-            lock_icon = assets.get_image("icons/lock_map")
-            if lock_icon:
-                # Dim the button
-                dim = pygame.Surface((btn.rect.width, btn.rect.height), pygame.SRCALPHA)
-                dim.fill((0, 0, 0, 150))
-                screen.blit(dim, btn.rect)
-                # Draw lock
-                lock_scaled = pygame.transform.smoothscale(lock_icon, (64, 64))
-                screen.blit(lock_scaled, lock_scaled.get_rect(center=btn.rect.center))
-            else:
-                # Fallback lock text
-                lock_label = self.btn_font.render("LOCKED", True, (255, 100, 100))
-                screen.blit(lock_label, lock_label.get_rect(center=btn.rect.center))
+            dim = pygame.Surface((btn.rect.width, btn.rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(dim, (0, 0, 0, 150),
+                             (0, 0, btn.rect.width, btn.rect.height), border_radius=28)
+            screen.blit(dim, btn.rect)
 
         border_color = (255, 255, 255) if active else btn.border
         border_width = 5 if active else 4
         pygame.draw.rect(screen, border_color, btn.rect, width=border_width, border_radius=28)
 
         if not btn.is_locked:
-            gloss = pygame.Rect(btn.rect.left + 16, btn.rect.top + 10, btn.rect.width - 150, 20)
+            gloss = pygame.Rect(btn.rect.left + 30, btn.rect.top + 12, btn.rect.width - 160, 18)
             pygame.draw.ellipse(screen, (255, 255, 255, 120), gloss)
 
         label_color = (255, 255, 255) if btn.thumbnail_key else (41, 50, 61)
@@ -291,6 +292,13 @@ class MainMenu:
             sub = self.small_font.render(btn.subtitle, True, label_color)
             sub_rect = sub.get_rect(center=(btn.rect.centerx, btn.rect.centery + 28))
             screen.blit(sub, sub_rect)
+
+        # Draw lock icon ON TOP of text so it's clearly visible
+        if btn.is_locked:
+            lock_icon = assets.get_image("icons/lock_map")
+            if lock_icon:
+                lock_scaled = pygame.transform.smoothscale(lock_icon, (64, 64))
+                screen.blit(lock_scaled, lock_scaled.get_rect(center=btn.rect.center))
 
     def _handle_click(self, pos: tuple[int, int]) -> str | None:
         if self.state != "home" and self.back_button.rect.collidepoint(pos):

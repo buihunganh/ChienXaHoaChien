@@ -3,6 +3,7 @@
 import pygame
 
 from src.core.game_manager import GameManager
+from src.entities.bullet import Bullet
 from src.utils.asset_manager import assets
 from src.utils.audio_manager import audio
 from src.utils.constants import FPS, HEIGHT, SCREEN_TITLE, WIDTH
@@ -23,6 +24,9 @@ def main() -> None:
 
     # Load all visual assets eagerly — must happen after display.set_mode()
     assets.load_all()
+
+    # Pre-compute rocket sprite so the first shot doesn't freeze the game
+    Bullet.eager_init()
 
     # Initialise audio — must happen after pygame.init()
     audio.init()

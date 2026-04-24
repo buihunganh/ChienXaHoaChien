@@ -182,7 +182,7 @@ class Tank:
         barrel_img  = assets.get_image(f"tanks/tank_{ck}_barrel")
 
         if body_img is None or turret_img is None or barrel_img is None:
-            # ---- FALLBACK: original procedural drawing ----
+            
             sprite, rect = self._build_sprite()
             surface.blit(sprite, rect)
             turret_x, turret_y = self.get_turret_base_pos()

@@ -132,14 +132,22 @@ class Terrain:
 
         The crater overlay starts with alpha=255 (no change on MIN blend),
         then a circle alpha=0 is drawn to force destination alpha to zero.
+        Applies to both collision surface and decoration surface (grass etc.).
         """
         crater = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
         crater.fill((255, 255, 255, 255))
         pygame.draw.circle(crater, (0, 0, 0, 0), (radius, radius), radius)
 
+        blit_pos = (int(x - radius), int(y - radius))
         self.surface.blit(
             crater,
-            (int(x - radius), int(y - radius)),
+            blit_pos,
+            special_flags=pygame.BLEND_RGBA_MIN,
+        )
+        # Also remove grass/decorations inside the crater
+        self.decoration_surface.blit(
+            crater,
+            blit_pos,
             special_flags=pygame.BLEND_RGBA_MIN,
         )
         self.update_mask()

@@ -107,22 +107,22 @@ class HUD:
 
     def _draw_vs_shield(self, screen: pygame.Surface) -> None:
         center = (WIDTH // 2, 70)
-        if self._shield_vs is not None:
-            rect = self._shield_vs.get_rect(center=center)
-            screen.blit(self._shield_vs, rect)
-            # VS text drawn on top (dynamic-ish but cheap)
-            text = self.font.render("VS", True, WHITE)
-            screen.blit(text, text.get_rect(center=center))
-        else:
-            # Fallback: original polygon drawing
-            shield = pygame.Surface((130, 130), pygame.SRCALPHA)
-            pts = [(65, 10), (114, 25), (104, 94), (65, 120), (26, 94), (16, 25)]
-            pygame.draw.polygon(shield, (52, 124, 210), pts)
-            pygame.draw.polygon(shield, (226, 62, 75), [(65, 10), (114, 25), (104, 94), (65, 120)])
-            pygame.draw.polygon(shield, (225, 236, 247), pts, width=5)
-            text = self.font.render("VS", True, WHITE)
-            shield.blit(text, text.get_rect(center=(66, 62)))
-            screen.blit(shield, (center[0] - 65, center[1] - 56))
+        # Draw a perfectly symmetric shield so left/right halves stay balanced.
+        shield = pygame.Surface((140, 124), pygame.SRCALPHA)
+        pts = [(70, 6), (128, 34), (118, 94), (70, 118), (22, 94), (12, 34)]
+        left_half = [(70, 6), (70, 118), (22, 94), (12, 34)]
+        right_half = [(70, 6), (128, 34), (118, 94), (70, 118)]
+
+        pygame.draw.polygon(shield, (69, 147, 222), left_half)
+        pygame.draw.polygon(shield, (215, 76, 90), right_half)
+        pygame.draw.polygon(shield, (223, 237, 251), pts, width=4)
+        pygame.draw.line(shield, (223, 237, 251), (70, 11), (70, 112), 2)
+
+        text = self.font.render("VS", True, WHITE)
+        shield.blit(text, text.get_rect(center=(70, 64)))
+
+        rect = shield.get_rect(center=center)
+        screen.blit(shield, rect)
 
     # ------------------------------------------------------------------
     # Wind indicator
@@ -236,16 +236,19 @@ class HUD:
     # ------------------------------------------------------------------
 
     def _draw_ammo_chip(self, screen: pygame.Surface, bullet_type: BulletType) -> None:
-        chip = pygame.Rect(WIDTH // 2 - 170, HEIGHT - 52, 340, 38)
-        pygame.draw.rect(screen, (247, 248, 239), chip, border_radius=12)
-        pygame.draw.rect(screen, (83, 125, 171), chip, width=2, border_radius=12)
-
         txt = self.small_font.render(
             f"Ammo: {bullet_type.name} | Dmg {bullet_type.damage}",
             True,
             (35, 54, 86),
         )
-        screen.blit(txt, (chip.centerx - txt.get_width() // 2, chip.top + 7))
+        # Dynamic width: text width + horizontal padding (40px each side)
+        chip_w = txt.get_width() + 80
+        chip_h = txt.get_height() + 16
+        chip = pygame.Rect(WIDTH // 2 - chip_w // 2, HEIGHT - 52, chip_w, chip_h)
+        pygame.draw.rect(screen, (247, 248, 239), chip, border_radius=12)
+        pygame.draw.rect(screen, (83, 125, 171), chip, width=2, border_radius=12)
+
+        screen.blit(txt, (chip.centerx - txt.get_width() // 2, chip.centery - txt.get_height() // 2))
 
     # ------------------------------------------------------------------
     # Main draw entry point
